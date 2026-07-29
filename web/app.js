@@ -18,7 +18,13 @@ const state = {
   batch: null,
   filter: 'all',
   showOverlay: true,
-  highlight: null,
+  // Regions are tracked by id, not list index: an index goes stale the moment
+  // something is deleted, and silently selecting the wrong region afterwards is
+  // worse than selecting none.
+  hoverId: null,
+  selectedId: null,
+  hitBoxes: [], // region boxes in canvas pixel space, for click testing
+  lastClick: null, // for cycling through stacked regions
 }
 
 const ROLES = ['headline', 'subhead', 'body', 'cta', 'price', 'legal']
@@ -50,6 +56,8 @@ async function init() {
   $('dClose').onclick = closeDrawer
   $('scrim').onclick = closeDrawer
   document.addEventListener('keydown', (e) => e.key === 'Escape' && closeDrawer())
+  wireCanvas()
+  wireRegionKeys()
 }
 
 /* ----------------------------------------------------------------- upload */
@@ -131,6 +139,9 @@ async function upload(file, sampleName = null) {
 
 function renderSource() {
   const { filename, analysis } = state.source
+  state.selectedId = null
+  state.hoverId = null
+  state.lastClick = null
   $('srcName').textContent = filename
   $('srcDims').textContent = `${analysis.source.w} × ${analysis.source.h}`
   $('srcBg').textContent = `${analysis.background.classification.class} (flatness ${analysis.background.classification.flatness})`
@@ -164,20 +175,21 @@ function renderRegionList() {
     $('regionList').innerHTML = `<li class="empty">No regions. Nothing is protected, so a crop may cut through anything.</li>`
   } else {
     $('regionList').innerHTML = regions
-      .map((r, i) => {
+      .map((r) => {
         const isText = r.type === 'text'
         const roleSelect = isText
-          ? `<select data-i="${i}" title="Role — this selects which legibility floor applies">${ROLES.map(
+          ? `<select data-id="${escapeHtml(r.id)}" title="Role — this selects which legibility floor applies">${ROLES.map(
               (role) => `<option value="${role}"${role === r.role ? ' selected' : ''}>${role}</option>`
             ).join('')}</select>`
           : `<span class="tag ${r.type}">${r.type}</span>`
         const conf = r.confidence != null ? r.confidence.toFixed(2) : '—'
         const human = r.source === 'human' ? '<span class="tag human" title="Edited by you">you</span>' : ''
-        return `<li data-i="${i}">
+        const sel = r.id === state.selectedId ? ' sel' : ''
+        return `<li class="${sel.trim()}" data-id="${escapeHtml(r.id)}">
           ${isText ? `<span class="tag">text</span>` : ''}${roleSelect}${human}
           <span class="conf${r.confidence < 0.45 ? ' low' : ''}" title="detector confidence">${conf}</span>
           <span class="cap">${r.capHeight ? `cap ${Math.round(r.capHeight)}px` : `${Math.round(r.box.w)}×${Math.round(r.box.h)}`}</span>
-          <button class="del" data-del="${i}" title="Remove this region — it will no longer be protected or measured">×</button>
+          <button class="del" data-del="${escapeHtml(r.id)}" title="Remove this region (or press Delete when selected)">×</button>
         </li>`
       })
       .join('')
@@ -188,39 +200,59 @@ function renderRegionList() {
     : ''
   if (edited) $('resetRegions').onclick = resetRegions
 
-  for (const li of $('regionList').querySelectorAll('li[data-i]')) {
+  for (const li of $('regionList').querySelectorAll('li[data-id]')) {
     li.onmouseenter = () => {
-      state.highlight = +li.dataset.i
-      li.classList.add('hl')
+      state.hoverId = li.dataset.id
       drawSource()
     }
     li.onmouseleave = () => {
-      state.highlight = null
-      li.classList.remove('hl')
+      state.hoverId = null
       drawSource()
+    }
+    // Clicking the row selects too, so selection works from either direction.
+    li.onclick = (e) => {
+      if (e.target.closest('select, .del')) return
+      selectRegion(li.dataset.id, { scroll: false })
     }
   }
 
   for (const sel of $('regionList').querySelectorAll('select')) {
     sel.onchange = () =>
       saveRegions(
-        state.source.analysis.regions.map((r, i) =>
-          i === +sel.dataset.i ? { ...r, role: sel.value, source: 'human' } : r
+        state.source.analysis.regions.map((r) =>
+          r.id === sel.dataset.id ? { ...r, role: sel.value, source: 'human' } : r
         ),
         `Role changed to ${sel.value}.`
       )
   }
 
   for (const btn of $('regionList').querySelectorAll('.del')) {
-    btn.onclick = () => {
-      const i = +btn.dataset.del
-      const r = state.source.analysis.regions[i]
-      saveRegions(
-        state.source.analysis.regions.filter((_, j) => j !== i),
-        `Removed the ${r.role ?? r.type} region.`
-      )
+    btn.onclick = (e) => {
+      e.stopPropagation()
+      deleteRegion(btn.dataset.del)
     }
   }
+}
+
+function deleteRegion(id) {
+  const r = state.source.analysis.regions.find((x) => x.id === id)
+  if (!r) return
+  if (state.selectedId === id) state.selectedId = null
+  saveRegions(
+    state.source.analysis.regions.filter((x) => x.id !== id),
+    `Removed the ${r.role ?? r.type} region.`
+  )
+}
+
+/** Select by id, mark the row, and bring it into view in a long list. */
+function selectRegion(id, { scroll = true } = {}) {
+  state.selectedId = state.selectedId === id ? null : id
+  for (const li of $('regionList').querySelectorAll('li[data-id]')) {
+    const on = li.dataset.id === state.selectedId
+    li.classList.toggle('sel', on)
+    if (on && scroll) li.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+  }
+  drawSource()
 }
 
 /**
@@ -281,6 +313,12 @@ function renderSourceFindings() {
     : ''
 }
 
+const REGION_COLOURS = {
+  text: 'rgba(76,141,255,0.95)',
+  logo: 'rgba(139,92,246,0.95)',
+  subject: 'rgba(63,185,80,0.8)',
+}
+
 function drawSource() {
   const img = state.sourceImage
   if (!img) return
@@ -293,40 +331,144 @@ function drawSource() {
   const ctx = canvas.getContext('2d')
   ctx.clearRect(0, 0, canvas.width, canvas.height)
   ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+
+  state.hitBoxes = []
   if (!state.showOverlay) return
 
-  const colours = {
-    text: 'rgba(76,141,255,0.95)',
-    logo: 'rgba(139,92,246,0.95)',
-    subject: 'rgba(63,185,80,0.8)',
-  }
+  // Draw largest first so small regions sit on top and stay clickable.
+  const ordered = [...state.source.analysis.regions].sort(
+    (a, b) => b.box.w * b.box.h - a.box.w * a.box.h
+  )
 
-  state.source.analysis.regions.forEach((r, i) => {
-    const b = r.box
-    const x = b.x * scale
-    const y = b.y * scale
-    const w = b.w * scale
-    const h = b.h * scale
-    const active = state.highlight === i
+  for (const r of ordered) {
+    const x = r.box.x * scale
+    const y = r.box.y * scale
+    const w = r.box.w * scale
+    const h = r.box.h * scale
+    state.hitBoxes.push({ id: r.id, x, y, w, h, area: w * h })
 
-    ctx.lineWidth = active ? 2.5 : r.type === 'subject' ? 1 : 1.5
-    ctx.setLineDash(r.type === 'subject' ? [4, 3] : [])
-    ctx.strokeStyle = colours[r.type] ?? 'rgba(255,255,255,0.7)'
-    ctx.strokeRect(x, y, w, h)
+    const selected = r.id === state.selectedId
+    const hovered = r.id === state.hoverId
+    const colour = REGION_COLOURS[r.type] ?? 'rgba(255,255,255,0.7)'
 
-    if (active) {
-      ctx.fillStyle = 'rgba(76,141,255,0.16)'
+    if (selected) {
+      ctx.fillStyle = 'rgba(76,141,255,0.2)'
+      ctx.fillRect(x, y, w, h)
+      // Second, offset stroke so selection reads clearly over any artwork.
+      ctx.setLineDash([])
+      ctx.lineWidth = 3
+      ctx.strokeStyle = '#ffffff'
+      ctx.strokeRect(x - 1.5, y - 1.5, w + 3, h + 3)
+    } else if (hovered) {
+      ctx.fillStyle = 'rgba(76,141,255,0.14)'
       ctx.fillRect(x, y, w, h)
     }
 
-    if (r.type === 'text' && (active || h > 14)) {
-      const labelText = r.role
-      ctx.font = '600 10px ui-monospace, monospace'
-      const tw = ctx.measureText(labelText).width + 8
-      ctx.fillStyle = colours.text
-      ctx.fillRect(x, Math.max(0, y - 13), tw, 13)
-      ctx.fillStyle = '#fff'
-      ctx.fillText(labelText, x + 4, Math.max(9, y - 3.5))
+    ctx.setLineDash(r.type === 'subject' && !selected ? [4, 3] : [])
+    ctx.lineWidth = selected ? 2.5 : hovered ? 2 : r.type === 'subject' ? 1 : 1.5
+    ctx.strokeStyle = colour
+    ctx.strokeRect(x, y, w, h)
+
+    if (r.type === 'text' && (selected || hovered || h > 14)) {
+      label(ctx, r.role, x, y, colour)
+    } else if (selected) {
+      label(ctx, r.type, x, y, colour)
+    }
+  }
+}
+
+function label(ctx, text, x, y, colour) {
+  ctx.setLineDash([])
+  ctx.font = '600 10px ui-monospace, monospace'
+  const tw = ctx.measureText(text).width + 8
+  ctx.fillStyle = colour
+  ctx.fillRect(x, Math.max(0, y - 13), tw, 13)
+  ctx.fillStyle = '#fff'
+  ctx.fillText(text, x + 4, Math.max(9, y - 3.5))
+}
+
+/**
+ * Map a pointer event to canvas pixel space. The canvas has a CSS max-width, so
+ * its rendered size and its pixel size diverge on narrow layouts — using offsetX
+ * directly would put every hit test in the wrong place there.
+ */
+function canvasPoint(e) {
+  const canvas = $('sourceCanvas')
+  const rect = canvas.getBoundingClientRect()
+  return {
+    x: ((e.clientX - rect.left) / rect.width) * canvas.width,
+    y: ((e.clientY - rect.top) / rect.height) * canvas.height,
+  }
+}
+
+/** Regions under a point, smallest first — the specific beats the general. */
+function hitsAt(pt) {
+  return state.hitBoxes
+    .filter((b) => pt.x >= b.x && pt.x <= b.x + b.w && pt.y >= b.y && pt.y <= b.y + b.h)
+    .sort((a, b) => a.area - b.area)
+}
+
+function wireCanvas() {
+  const canvas = $('sourceCanvas')
+
+  canvas.onmousemove = (e) => {
+    if (!state.source) return
+    const hit = hitsAt(canvasPoint(e))[0]
+    canvas.style.cursor = hit ? 'pointer' : 'default'
+    if ((hit?.id ?? null) !== state.hoverId) {
+      state.hoverId = hit?.id ?? null
+      drawSource()
+    }
+  }
+
+  canvas.onmouseleave = () => {
+    if (state.hoverId) {
+      state.hoverId = null
+      drawSource()
+    }
+  }
+
+  canvas.onclick = (e) => {
+    if (!state.source) return
+    const pt = canvasPoint(e)
+    const hits = hitsAt(pt)
+    if (!hits.length) {
+      state.selectedId = null
+      renderRegionList()
+      drawSource()
+      return
+    }
+
+    // Regions overlap constantly — the subject box covers most of the frame, and
+    // type sits inside it. Clicking the same spot again steps down through the
+    // stack rather than being stuck on whatever is smallest.
+    const near =
+      state.lastClick && Math.hypot(pt.x - state.lastClick.x, pt.y - state.lastClick.y) < 6
+    const index = near ? (state.lastClick.index + 1) % hits.length : 0
+    state.lastClick = { x: pt.x, y: pt.y, index }
+
+    state.selectedId = null // force selectRegion to select rather than toggle off
+    selectRegion(hits[index].id)
+    renderRegionList()
+    if (hits.length > 1) {
+      toast(`${hits.length} regions overlap here — click again to cycle.`, 2200)
+    }
+  }
+}
+
+/** Delete removes the selected region; Escape clears the selection. */
+function wireRegionKeys() {
+  document.addEventListener('keydown', (e) => {
+    if (!state.source || !state.selectedId) return
+    const typing = /^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement?.tagName ?? '')
+    if (typing) return
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      e.preventDefault()
+      deleteRegion(state.selectedId)
+    } else if (e.key === 'Escape') {
+      state.selectedId = null
+      renderRegionList()
+      drawSource()
     }
   })
 }

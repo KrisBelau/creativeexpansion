@@ -111,7 +111,13 @@ canvas { max-width: 100%; height: auto; display: block; border-radius: 4px; }
   background: var(--panel-2); border: 1px solid var(--line);
   border-radius: 7px; padding: 6px 8px; font-size: 12px;
 }
+.regions li { cursor: pointer; }
 .regions li.hl { border-color: var(--accent); }
+.regions li.sel {
+  border-color: var(--accent);
+  background: rgba(76, 141, 255, 0.12);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
 .regions .tag {
   font-family: var(--mono); font-size: 10px; padding: 2px 5px; border-radius: 4px;
   background: rgba(76, 141, 255, 0.14); color: #9ec1ff; text-transform: uppercase;
@@ -150,6 +156,11 @@ canvas { max-width: 100%; height: auto; display: block; border-radius: 4px; }
 .panel.stale .grid, .panel.stale .summary { opacity: .45; }
 
 .note { font-size: 11px; color: var(--ink-3); margin-top: 10px; line-height: 1.45; }
+.note b { color: var(--ink-2); font-weight: 600; }
+kbd {
+  font-family: var(--mono); font-size: 10px; padding: 1px 4px; border-radius: 3px;
+  background: var(--panel-2); border: 1px solid var(--line-2); color: var(--ink-2);
+}
 
 /* ----------------------------------------------------------------- presets */
 
