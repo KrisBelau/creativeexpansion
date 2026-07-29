@@ -1,0 +1,104 @@
+{
+  "version": 1,
+  "note": "Machine-readable form of SPEC.md 7.1-7.3. Workspace-configurable; these are the defaults. A placement resolves its floors via its viewing context (formats.json -> context).",
+  "bases": {
+    "shortSide": "minPct is measured against min(canvasW, canvasH)",
+    "frameHeight": "minPct is measured against canvasH",
+    "absolute": "only minPx applies, measured at the served size in 1x CSS pixels"
+  },
+  "contexts": {
+    "mobile": {
+      "label": "Mobile in-hand",
+      "basis": "shortSide",
+      "referenceShortSide": 1080,
+      "measureScale": 1,
+      "roles": {
+        "headline": { "minPx": 44, "minPct": 4.0, "maxLines": 3, "priority": 90 },
+        "subhead": { "minPx": 32, "minPct": 3.0, "maxLines": 2, "priority": 60, "droppable": true },
+        "body": { "minPx": 28, "minPct": 2.6, "maxLines": 4, "priority": 40, "droppable": true },
+        "cta": { "minPx": 30, "minPct": 2.8, "maxLines": 1, "priority": 85 },
+        "price": { "minPx": 34, "minPct": 3.1, "maxLines": 1, "priority": 80 },
+        "legal": { "minPx": 20, "minPct": 1.85, "maxLines": 3, "priority": 95 }
+      }
+    },
+    "display": {
+      "label": "Desktop display banner",
+      "basis": "absolute",
+      "measureScale": 1,
+      "roles": {
+        "headline": { "minPx": 14, "maxLines": 2, "priority": 90, "belowFloor": "drop" },
+        "subhead": { "minPx": 12, "maxLines": 1, "priority": 60, "droppable": true },
+        "body": { "minPx": 12, "maxLines": 3, "priority": 40, "droppable": true, "prohibitedUnderCanvasHeight": 60 },
+        "cta": { "minPx": 12, "maxLines": 1, "priority": 85, "minButtonHeight": 24 },
+        "price": { "minPx": 13, "maxLines": 1, "priority": 80 },
+        "legal": { "minPx": 9, "maxLines": 2, "priority": 95, "belowFloor": "legal_review" }
+      }
+    },
+    "ctv": {
+      "label": "Connected TV, ~2.5 m",
+      "basis": "frameHeight",
+      "measureScale": 1,
+      "roles": {
+        "default": { "minPct": 2.0, "maxLines": 3, "priority": 90 },
+        "legal": { "minPct": 2.0, "maxLines": 3, "priority": 95 }
+      }
+    },
+    "dooh": {
+      "label": "Digital out-of-home, 2-5 m",
+      "basis": "frameHeight",
+      "measureScale": 1,
+      "maxWordsOnScreen": 7,
+      "roles": {
+        "default": { "minPct": 3.0, "maxLines": 2, "priority": 90 }
+      }
+    },
+    "billboard": {
+      "label": "Digital billboard, 30 m+",
+      "basis": "frameHeight",
+      "measureScale": 1,
+      "maxWordsOnScreen": 5,
+      "roles": {
+        "default": { "minPct": 6.0, "maxLines": 1, "priority": 90 }
+      }
+    },
+    "email": {
+      "label": "Email, rendered at half the retina canvas",
+      "basis": "absolute",
+      "measureScale": 0.5,
+      "roles": {
+        "headline": { "minPx": 18, "maxLines": 3, "priority": 90 },
+        "subhead": { "minPx": 14, "maxLines": 2, "priority": 60, "droppable": true },
+        "body": { "minPx": 13, "maxLines": 4, "priority": 40, "droppable": true },
+        "cta": { "minPx": 14, "maxLines": 1, "priority": 85, "minButtonHeight": 44 },
+        "price": { "minPx": 16, "maxLines": 1, "priority": 80 },
+        "legal": { "minPx": 10, "maxLines": 3, "priority": 95 }
+      }
+    }
+  },
+  "contrast": {
+    "smallTextRatio": 4.5,
+    "largeTextRatio": 3.0,
+    "largeTextMultiplier": 1.5,
+    "logoRatio": 3.0,
+    "busyBackgroundEnergyThreshold": 0.28
+  },
+  "composition": {
+    "minEdgePaddingPct": 4.0,
+    "minEdgePaddingPxFloor": 12,
+    "smallCanvasThreshold": 300,
+    "gridPt": 8,
+    "softSafeZoneMultiplier": 1.25,
+    "maxTextCoveragePct": 20,
+    "maxTypeSizesPerOutput": 3,
+    "minHierarchyRatio": 1.25,
+    "minWeightSmallPx": 24
+  },
+  "craft": {
+    "maxUpscaleWarn": 1.0,
+    "maxUpscaleBlock": 2.0,
+    "seamScoreWarn": 0.06,
+    "seamScoreReject": 0.14,
+    "fileSizeTargetRatio": 0.9,
+    "minProductCoverage": 0.95
+  }
+}

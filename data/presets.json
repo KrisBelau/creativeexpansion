@@ -1,0 +1,103 @@
+{
+  "version": 1,
+  "note": "Named placement bundles. `placements` holds placement ids from formats.json; `platforms` expands to every image-capable placement on those platforms.",
+  "presets": [
+    {
+      "id": "meta-fanout",
+      "name": "Meta Full Fan-out",
+      "description": "Every static Meta placement, feed through stories.",
+      "placements": [
+        "meta_feed_square",
+        "meta_feed_portrait",
+        "meta_stories",
+        "meta_right_column",
+        "meta_carousel"
+      ]
+    },
+    {
+      "id": "gdn-iab-core",
+      "name": "Google Display — IAB Core",
+      "description": "The nine highest-inventory IAB sizes. The hard cases: 320x50 and 120x600.",
+      "placements": [
+        "gdn_300x250",
+        "gdn_336x280",
+        "gdn_728x90",
+        "gdn_970x250",
+        "gdn_300x600",
+        "gdn_160x600",
+        "gdn_120x600",
+        "gdn_320x50",
+        "gdn_320x100"
+      ]
+    },
+    {
+      "id": "gdn-iab-full",
+      "name": "Google Display — Full IAB",
+      "description": "All 27 uploaded display sizes.",
+      "platforms": ["google_display"]
+    },
+    {
+      "id": "google-assets",
+      "name": "Google Ads Asset Set",
+      "description": "The required responsive asset family: landscape, square, portrait, both logos.",
+      "placements": [
+        "goog_asset_landscape",
+        "goog_asset_square",
+        "goog_asset_portrait",
+        "goog_asset_logo_square",
+        "goog_asset_logo_landscape"
+      ]
+    },
+    {
+      "id": "social-core",
+      "name": "Social Core",
+      "description": "One square, one portrait, one vertical per major social platform.",
+      "placements": [
+        "meta_feed_square",
+        "meta_feed_portrait",
+        "meta_stories",
+        "pin_standard_2x3",
+        "li_single_landscape",
+        "li_single_square",
+        "x_image_square",
+        "x_image_landscape",
+        "reddit_image_square",
+        "snap_single"
+      ]
+    },
+    {
+      "id": "retail-media",
+      "name": "Retail Media",
+      "description": "Amazon plus the display sizes retail networks reuse.",
+      "placements": [
+        "amz_sd_custom_image",
+        "amz_sb_brand_logo",
+        "amz_dsp_300x250",
+        "amz_dsp_728x90",
+        "amz_dsp_160x600",
+        "amz_dsp_300x600",
+        "amz_dsp_970x250",
+        "amz_dsp_320x50"
+      ]
+    },
+    {
+      "id": "programmatic-everything",
+      "name": "Programmatic Everything",
+      "description": "Display plus Microsoft plus OOH. The widest static fan-out.",
+      "platforms": ["google_display", "microsoft", "dooh"],
+      "placements": ["goog_asset_landscape", "goog_asset_square", "goog_asset_portrait"]
+    },
+    {
+      "id": "smoke-test",
+      "name": "Smoke Test",
+      "description": "Five placements spanning every hard case: safe zone, extreme ratio, tiny canvas, byte ceiling.",
+      "placements": [
+        "meta_feed_square",
+        "meta_stories",
+        "gdn_300x250",
+        "gdn_320x50",
+        "gdn_120x600"
+      ]
+    }
+  ]
+}

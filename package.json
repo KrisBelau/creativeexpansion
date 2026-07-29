@@ -1,0 +1,22 @@
+{
+  "name": "creative-expansion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A web utility that takes finished image and video ad creative and expands it into every format a media plan needs — without the output looking resized.",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/server.js",
+    "catalog": "node scripts/gen-catalog.mjs",
+    "catalog:check": "node scripts/gen-catalog.mjs --check",
+    "sample": "node scripts/make-sample.mjs",
+    "batch": "node scripts/run-batch.mjs",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "archiver": "^8.0.0",
+    "express": "^5.2.1",
+    "multer": "^2.2.0",
+    "sharp": "^0.35.3"
+  }
+}

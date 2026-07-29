@@ -86,12 +86,11 @@ for (const p of catalog.platforms) {
   }
 
   const hasVideo = p.placements.some((pl) => pl.video)
-  const header = hasVideo
-    ? `| Placement | Media | Ratio | Canvas | Min | Safe zone | Max size | Duration |`
-    : `| Placement | Media | Ratio | Canvas | Min | Safe zone | Max size |`
-  const divider = hasVideo ? `| --- | --- | --- | --- | --- | --- | --- | --- |` : `| --- | --- | --- | --- | --- | --- | --- |`
-  rows.push(header)
-  rows.push(divider)
+  const cols = ['Placement', 'Media', 'Ratio', 'Canvas', 'Min', 'Safe zone', 'Max size']
+  if (hasVideo) cols.push('Duration')
+  cols.push('Context')
+  rows.push(`| ${cols.join(' | ')} |`)
+  rows.push(`| ${cols.map(() => '---').join(' | ')} |`)
 
   const noted = []
   for (const pl of p.placements) {
@@ -107,6 +106,7 @@ for (const p of catalog.platforms) {
       bytes(max),
     ]
     if (hasVideo) cells.push(duration(pl.video))
+    cells.push(pl.context ?? p.context ?? '—')
     rows.push(`| ${cells.join(' | ')} |`)
     if (pl.notes?.length) noted.push(pl)
   }
