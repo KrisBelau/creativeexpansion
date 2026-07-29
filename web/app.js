@@ -158,24 +158,37 @@ function renderSource() {
 
 function renderRegionList() {
   const regions = state.source.analysis.regions
-  $('regionList').innerHTML = regions
-    .map((r, i) => {
-      const isText = r.type === 'text'
-      const roleSelect = isText
-        ? `<select data-i="${i}">${ROLES.map(
-            (role) => `<option value="${role}"${role === r.role ? ' selected' : ''}>${role}</option>`
-          ).join('')}</select>`
-        : `<span class="tag ${r.type}">${r.type}</span>`
-      const conf = r.confidence != null ? r.confidence.toFixed(2) : '—'
-      return `<li data-i="${i}">
-        ${isText ? `<span class="tag">text</span>` : ''}${roleSelect}
-        <span class="conf${r.confidence < 0.45 ? ' low' : ''}" title="detector confidence">${conf}</span>
-        <span class="cap">${r.capHeight ? `cap ${Math.round(r.capHeight)}px` : `${Math.round(r.box.w)}×${Math.round(r.box.h)}`}</span>
-      </li>`
-    })
-    .join('')
+  const edited = state.source.analysis.regionsEdited
 
-  for (const li of $('regionList').querySelectorAll('li')) {
+  if (!regions.length) {
+    $('regionList').innerHTML = `<li class="empty">No regions. Nothing is protected, so a crop may cut through anything.</li>`
+  } else {
+    $('regionList').innerHTML = regions
+      .map((r, i) => {
+        const isText = r.type === 'text'
+        const roleSelect = isText
+          ? `<select data-i="${i}" title="Role — this selects which legibility floor applies">${ROLES.map(
+              (role) => `<option value="${role}"${role === r.role ? ' selected' : ''}>${role}</option>`
+            ).join('')}</select>`
+          : `<span class="tag ${r.type}">${r.type}</span>`
+        const conf = r.confidence != null ? r.confidence.toFixed(2) : '—'
+        const human = r.source === 'human' ? '<span class="tag human" title="Edited by you">you</span>' : ''
+        return `<li data-i="${i}">
+          ${isText ? `<span class="tag">text</span>` : ''}${roleSelect}${human}
+          <span class="conf${r.confidence < 0.45 ? ' low' : ''}" title="detector confidence">${conf}</span>
+          <span class="cap">${r.capHeight ? `cap ${Math.round(r.capHeight)}px` : `${Math.round(r.box.w)}×${Math.round(r.box.h)}`}</span>
+          <button class="del" data-del="${i}" title="Remove this region — it will no longer be protected or measured">×</button>
+        </li>`
+      })
+      .join('')
+  }
+
+  $('regionActions').innerHTML = edited
+    ? `<button class="link small" id="resetRegions">restore detected regions</button>`
+    : ''
+  if (edited) $('resetRegions').onclick = resetRegions
+
+  for (const li of $('regionList').querySelectorAll('li[data-i]')) {
     li.onmouseenter = () => {
       state.highlight = +li.dataset.i
       li.classList.add('hl')
@@ -189,22 +202,76 @@ function renderRegionList() {
   }
 
   for (const sel of $('regionList').querySelectorAll('select')) {
-    sel.onchange = async () => {
-      const regions = state.source.analysis.regions.map((r, i) =>
-        i === +sel.dataset.i ? { ...r, role: sel.value, source: 'human' } : r
+    sel.onchange = () =>
+      saveRegions(
+        state.source.analysis.regions.map((r, i) =>
+          i === +sel.dataset.i ? { ...r, role: sel.value, source: 'human' } : r
+        ),
+        `Role changed to ${sel.value}.`
       )
-      const res = await fetch(`/api/sources/${state.source.id}/regions`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ regions }),
-      })
-      const data = await res.json()
-      state.source.analysis = data.analysis
-      renderRegionList()
-      drawSource()
-      toast('Role updated. Re-render to apply.', 2000)
+  }
+
+  for (const btn of $('regionList').querySelectorAll('.del')) {
+    btn.onclick = () => {
+      const i = +btn.dataset.del
+      const r = state.source.analysis.regions[i]
+      saveRegions(
+        state.source.analysis.regions.filter((_, j) => j !== i),
+        `Removed the ${r.role ?? r.type} region.`
+      )
     }
   }
+}
+
+/**
+ * Regions are the analysis, and the analysis is what every downstream stage
+ * reads — so an edit invalidates any batch already rendered from it. Say so
+ * rather than leaving a stale grid looking current.
+ */
+async function saveRegions(regions, message) {
+  try {
+    const res = await fetch(`/api/sources/${state.source.id}/regions`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ regions }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error ?? 'Could not save regions')
+    state.source.analysis = data.analysis
+    state.regionsDirty = true
+    renderRegionList()
+    renderSourceFindings()
+    drawSource()
+    markStale()
+    toast(`${message} Re-render to apply.`, 2600)
+  } catch (err) {
+    toast(err.message, 4000, true)
+  }
+}
+
+async function resetRegions() {
+  try {
+    const res = await fetch(`/api/sources/${state.source.id}/regions/reset`, { method: 'POST' })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error ?? 'Could not reset')
+    state.source.analysis = data.analysis
+    state.regionsDirty = true
+    renderRegionList()
+    renderSourceFindings()
+    drawSource()
+    markStale()
+    toast('Restored the detected regions. Re-render to apply.', 2600)
+  } catch (err) {
+    toast(err.message, 4000, true)
+  }
+}
+
+/** Flag the review panel as reflecting a superseded analysis. */
+function markStale() {
+  if (!state.batch) return
+  $('panelReview').classList.add('stale')
+  $('staleBadge').hidden = false
+  $('runBtn').textContent = 'Re-render'
 }
 
 function renderSourceFindings() {
@@ -355,14 +422,16 @@ async function run() {
     if (!res.ok) throw new Error(data.error ?? 'Render failed')
 
     state.batch = data
-    $('panelReview').classList.remove('disabled')
+    state.regionsDirty = false
+    $('panelReview').classList.remove('disabled', 'stale')
+    $('staleBadge').hidden = true
     renderReview()
     $('panelReview').scrollIntoView({ behavior: 'smooth', block: 'start' })
   } catch (err) {
     toast(err.message, 5000, true)
   } finally {
     $('runBtn').disabled = false
-    $('runBtn').textContent = 'Render'
+    $('runBtn').textContent = state.batch ? 'Re-render' : 'Render'
   }
 }
 

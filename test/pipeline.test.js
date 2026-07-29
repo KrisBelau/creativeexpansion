@@ -354,6 +354,95 @@ describe('input handling', () => {
   })
 })
 
+/* ------------------------------------------------------------ region edits */
+
+describe('region edits', () => {
+  async function master() {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080">
+      <rect width="1080" height="1080" fill="#ffffff"/>
+      <text x="70" y="300" font-family="DejaVu Sans" font-size="120" font-weight="bold" fill="#111">Headline</text>
+      <text x="70" y="1020" font-family="DejaVu Sans" font-size="22" fill="#555">Small print that sits near the foot of the frame.</text>
+    </svg>`
+    return sharp(Buffer.from(svg)).png().toBuffer()
+  }
+
+  test('removing a region drops the findings it caused', async () => {
+    // The detector produces false positives on busy artwork, and a region that
+    // cannot be removed is a finding that cannot be resolved — which is why the
+    // review UI has to be able to delete, not just retype.
+    const input = await master()
+    const analysis = await analyse(input)
+    const text = analysis.regions.filter((r) => r.type === 'text')
+    assert.ok(text.length >= 2, 'need at least two text regions for this test')
+
+    const victim = text[text.length - 1]
+    const before = await runBatch({ input, analysis, recipe: { placements: ['gdn_300x250'] } })
+    assert.ok(
+      before.outputs[0].findings.some((f) => f.regionRef === victim.id),
+      'expected a finding against the region we are about to remove'
+    )
+
+    const edited = { ...analysis, regions: analysis.regions.filter((r) => r.id !== victim.id) }
+    const after = await runBatch({ input, analysis: edited, recipe: { placements: ['gdn_300x250'] } })
+    assert.deepEqual(
+      after.outputs[0].findings.filter((f) => f.regionRef === victim.id),
+      [],
+      'findings must not outlive the region they describe'
+    )
+  })
+
+  test('removing every text region frees the crop solver', async () => {
+    const input = await master()
+    const analysis = await analyse(input)
+
+    const stripped = { ...analysis, regions: analysis.regions.filter((r) => r.type !== 'text') }
+    const batch = await runBatch({ input, analysis: stripped, recipe: { placements: ['gdn_728x90'] } })
+    const [out] = batch.outputs
+    assert.deepEqual(
+      out.measurements,
+      [],
+      'no type regions means nothing to measure'
+    )
+    assert.ok(
+      !out.findings.some((f) => f.code.startsWith('type_below_floor')),
+      'type findings cannot exist without type regions'
+    )
+  })
+
+  test('a human-confirmed region is not softened by the confidence downgrade', async () => {
+    // Low detector confidence downgrades a blocker to a warning, because the
+    // detector might be wrong. A human who confirmed the region removes that
+    // excuse, so the same geometry must block.
+    const input = await master()
+    const analysis = await analyse(input)
+    const tiny = {
+      id: 'tiny',
+      type: 'text',
+      role: 'body',
+      box: { x: 100, y: 500, w: 300, h: 30 },
+      capHeight: 22,
+      protection: 'protected',
+      source: 'auto',
+      confidence: 0.2,
+      sourceContrast: 21,
+    }
+
+    const asGuess = await runBatch({
+      input,
+      analysis: { ...analysis, regions: [tiny] },
+      recipe: { placements: ['gdn_300x250'] },
+    })
+    assert.equal(asGuess.outputs[0].state, 'warn')
+
+    const asConfirmed = await runBatch({
+      input,
+      analysis: { ...analysis, regions: [{ ...tiny, source: 'human', confidence: 1 }] },
+      recipe: { placements: ['gdn_300x250'] },
+    })
+    assert.equal(asConfirmed.outputs[0].state, 'blocked')
+  })
+})
+
 /* ----------------------------------------------------------------- export */
 
 describe('export', () => {

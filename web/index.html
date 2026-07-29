@@ -55,9 +55,12 @@
 
             <h3>Detected regions <button class="link small" id="toggleOverlay">hide overlay</button></h3>
             <ul class="regions" id="regionList"></ul>
+            <div id="regionActions"></div>
             <p class="note">
-              Roles drive the legibility floors. Correct one and the rules follow — this is the
-              highest-leverage edit in the tool.
+              Hover a row to locate it on the master. Change a role to select which legibility
+              floor applies, or remove a region the detector got wrong — a false positive on
+              busy artwork will otherwise constrain every crop and report findings against type
+              that isn't there.
             </p>
 
             <div id="sourceFindings"></div>
@@ -93,7 +96,10 @@
       <!-- ------------------------------------------------------------ step 3 -->
       <section class="panel disabled" id="panelReview">
         <div class="panel-head">
-          <h2><span class="step">3</span> Review</h2>
+          <h2>
+            <span class="step">3</span> Review
+            <span class="stale-badge" id="staleBadge" hidden>regions changed — re-render</span>
+          </h2>
           <div class="review-actions">
             <div class="filters" id="filters"></div>
             <button class="ghost small" id="manifestBtn" disabled>Manifest</button>

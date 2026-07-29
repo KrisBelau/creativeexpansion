@@ -104,8 +104,10 @@ These are honest gaps, not oversights — see SPEC §17 for the open questions b
   re-typesets copy at the correct size is not built. That is the single biggest quality lever
   still on the table: without it, a flat master's type can only be scaled, never re-set.
 - **Text detection is heuristic** and misses outline and script faces while occasionally
-  finding type in busy photography. Every region is editable in the UI for exactly this reason,
-  and low-confidence regions warn rather than block.
+  finding type in busy photography. So the region list lets you retype or remove anything it got
+  wrong, with one click to restore the detected set, and low-confidence regions warn rather than
+  block. You cannot yet *draw* a region the detector missed entirely — that is the next gap, and
+  it matters more than removal, because undetected type is type a crop will cut straight through.
 - **Logo protection needs a reference image.** Without one there is no reliable way to tell a
   brand mark from any other graphic, so the output says `logo_not_verified` rather than
   implying a guarantee it cannot make.

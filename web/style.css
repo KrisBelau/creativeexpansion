@@ -65,6 +65,9 @@ main {
 .panel {
   background: var(--panel); border: 1px solid var(--line);
   border-radius: var(--radius); padding: 16px;
+  /* The topbar is sticky, so scrollIntoView would otherwise park a panel's own
+     header underneath it — including the "regions changed" badge. */
+  scroll-margin-top: 68px;
 }
 .panel.disabled { opacity: 0.42; pointer-events: none; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
@@ -122,6 +125,29 @@ canvas { max-width: 100%; height: auto; display: block; border-radius: 4px; }
 .regions .cap { color: var(--ink-3); font-family: var(--mono); font-size: 10px; margin-left: auto; }
 .regions .conf { color: var(--ink-3); font-family: var(--mono); font-size: 10px; }
 .regions .conf.low { color: var(--warn); }
+.regions .tag.human { background: rgba(63, 185, 80, 0.16); color: #7ee787; }
+.regions li.empty { color: var(--ink-3); font-size: 11px; justify-content: center; }
+
+.regions .del {
+  background: none; border: 1px solid transparent; color: var(--ink-3);
+  font-size: 15px; line-height: 1; width: 20px; height: 20px; border-radius: 5px;
+  display: grid; place-items: center; flex: 0 0 auto; padding: 0;
+}
+.regions li:hover .del { border-color: var(--line-2); color: var(--ink-2); }
+.regions .del:hover { border-color: var(--blocked) !important; color: #ff7b72 !important; background: rgba(248, 81, 73, 0.12); }
+
+#regionActions { margin-top: 8px; text-align: right; }
+#regionActions .link { float: none; }
+
+/* An edit to the regions invalidates the grid rendered from them. Kept in the
+   flow rather than absolutely positioned, so it cannot collide with the header
+   actions at narrow widths. */
+.stale-badge {
+  font-size: 10px; text-transform: none; letter-spacing: 0;
+  background: rgba(210, 153, 34, .16); color: #e3b341;
+  padding: 3px 8px; border-radius: 5px; white-space: nowrap; font-weight: 500;
+}
+.panel.stale .grid, .panel.stale .summary { opacity: .45; }
 
 .note { font-size: 11px; color: var(--ink-3); margin-top: 10px; line-height: 1.45; }
 
