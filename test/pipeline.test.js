@@ -259,6 +259,101 @@ describe('pipeline', () => {
   })
 })
 
+/* --------------------------------------------------------- input handling */
+
+describe('input handling', () => {
+  /** A landscape image with a red band along its top edge. */
+  async function banded() {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600">
+      <rect width="1200" height="600" fill="#2255aa"/>
+      <rect width="1200" height="120" fill="#ff0000"/>
+    </svg>`
+    return sharp(Buffer.from(svg)).jpeg().toBuffer()
+  }
+
+  test('EXIF-transposing orientations report their real dimensions', async () => {
+    // sharp's metadata() reports stored dimensions and ignores a pipeline
+    // `.rotate()`, so orientations 5-8 report width and height the wrong way
+    // round. Trusting them makes the crop solver reason about a frame that does
+    // not exist and `.extract()` then throws "bad extract area".
+    const input = await sharp(await banded()).withMetadata({ orientation: 6 }).jpeg().toBuffer()
+    const analysis = await analyse(input)
+    assert.equal(analysis.source.w, 600)
+    assert.equal(analysis.source.h, 1200)
+    assert.equal(analysis.orientation.transposed, true)
+  })
+
+  test('every EXIF orientation renders without failing', async () => {
+    for (const orientation of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      const input = await sharp(await banded()).withMetadata({ orientation }).jpeg().toBuffer()
+      const batch = await runBatch({ input, recipe: { placements: ['gdn_300x250'] } })
+      const [out] = batch.outputs
+      const failures = out.findings.filter((f) => f.code === 'render_failed')
+      assert.deepEqual(failures, [], `orientation ${orientation}: ${JSON.stringify(failures)}`)
+      const meta = await sharp(out.buffer).metadata()
+      assert.equal(meta.width, 300, `orientation ${orientation} width`)
+      assert.equal(meta.height, 250, `orientation ${orientation} height`)
+    }
+  })
+
+  test('transparency is flattened to the policy colour, not to black', async () => {
+    // JPEG has no alpha channel. Left unflattened, transparent areas encode as
+    // solid black, which reads as though the image was cropped away — and it
+    // passed validation, because nothing was measuring it.
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080">
+      <rect y="400" width="1080" height="680" fill="#f4f1ea"/>
+      <text x="80" y="620" font-size="90" font-weight="bold" font-family="DejaVu Sans" fill="#0d1b2a">Alpha</text>
+    </svg>`
+    const input = await sharp(Buffer.from(svg)).png().toBuffer()
+    assert.equal((await sharp(input).metadata()).hasAlpha, true)
+
+    const batch = await runBatch({ input, recipe: { placements: ['meta_feed_square'] } })
+    const [out] = batch.outputs
+    assert.equal(out.format, 'jpg')
+
+    // Sample inside what was the transparent region.
+    const { data } = await sharp(out.buffer)
+      .extract({ left: 40, top: 40, width: 40, height: 40 })
+      .raw()
+      .toBuffer({ resolveWithObject: true })
+    const mean = data.reduce((a, b) => a + b, 0) / data.length
+    assert.ok(mean > 230, `transparent area rendered dark (mean channel ${mean.toFixed(1)})`)
+
+    assert.ok(
+      out.findings.some((f) => f.code === 'transparency_flattened'),
+      'flattening must be reported, not silent'
+    )
+  })
+
+  test('a source with transparency is flagged at analysis time', async () => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="600">
+      <rect y="300" width="600" height="300" fill="#123456"/>
+    </svg>`
+    const analysis = await analyse(await sharp(Buffer.from(svg)).png().toBuffer())
+    assert.ok(analysis.alpha.hasAlpha)
+    assert.ok(analysis.alpha.fraction > 0.4, `got ${analysis.alpha.fraction}`)
+    assert.ok(analysis.quality.findings.some((f) => f.code === 'source_has_transparency'))
+  })
+
+  test('a crop that discards a lot of the master says so', async () => {
+    // A tall master cropped to a square loses a great deal of frame. Detection
+    // may have missed type in what was thrown away, so it cannot be silent.
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="2000">
+      <rect width="800" height="2000" fill="#ffffff"/>
+      <circle cx="400" cy="1500" r="220" fill="#123456"/>
+    </svg>`
+    const input = await sharp(Buffer.from(svg)).png().toBuffer()
+    const batch = await runBatch({ input, recipe: { placements: ['meta_feed_square'] } })
+    const [out] = batch.outputs
+    if (out.transform.kind === 'crop') {
+      assert.ok(
+        out.findings.some((f) => f.code === 'crop_discarded_content'),
+        'a heavy crop must report what it discarded'
+      )
+    }
+  })
+})
+
 /* ----------------------------------------------------------------- export */
 
 describe('export', () => {

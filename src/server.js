@@ -171,7 +171,11 @@ app.post('/api/sources', upload.fields([{ name: 'source' }, { name: 'logo' }]), 
 app.get('/api/sources/:id/image', (req, res) => {
   const src = sources.get(req.params.id)
   if (!src) return res.status(404).end()
-  res.type('image/png').send(src.buffer)
+  // Serve the true type. Labelling a JPEG as PNG relies on browser sniffing, and
+  // it hides EXIF orientation from the browser — which then disagrees with the
+  // orientation analysis used, putting every region overlay in the wrong place.
+  res.type(src.analysis.format ? `image/${src.analysis.format}` : 'application/octet-stream')
+  res.send(src.buffer)
 })
 
 /**
@@ -291,6 +295,9 @@ function publicAnalysis(analysis) {
   return {
     engineVersion: analysis.engineVersion,
     source: analysis.source,
+    format: analysis.format ?? null,
+    alpha: analysis.alpha ?? null,
+    orientation: analysis.orientation ?? null,
     regions: analysis.regions.map((r) => ({
       id: r.id,
       type: r.type,
@@ -336,6 +343,24 @@ function publicBatch(batch) {
     })),
   }
 }
+
+/**
+ * Multer rejects an oversized upload in middleware, before any route handler's
+ * try/catch can see it. Without this the client gets Express's default HTML
+ * error page, the UI's JSON parse fails, and the user is told nothing useful
+ * about a limit they can actually do something about.
+ */
+app.use((err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    const message =
+      err.code === 'LIMIT_FILE_SIZE'
+        ? `That file is over this instance's ${MAX_UPLOAD_MB} MB upload limit. Downsample it, or raise MAX_UPLOAD_MB on a larger instance.`
+        : `Upload rejected (${err.code}).`
+    return res.status(413).json({ error: message })
+  }
+  if (res.headersSent) return next(err)
+  res.status(500).json({ error: err?.message ?? 'Unexpected server error.' })
+})
 
 const port = process.env.PORT ?? 3000
 // 0.0.0.0 explicitly: platform health checks reach the container from outside,

@@ -127,8 +127,17 @@ export function boxBlur(grid, radius) {
 export async function loadProxy(input, long = 512) {
   const image = sharp(input, { failOn: 'none' }).rotate()
   const meta = await image.metadata()
-  const srcW = meta.width
-  const srcH = meta.height
+
+  // `metadata()` reports the *stored* dimensions, not the pipeline's output, so
+  // it ignores the `.rotate()` above. EXIF orientations 5-8 transpose the image,
+  // which means a phone photo's real dimensions are the reverse of what is
+  // reported. Getting this wrong makes every downstream coordinate meaningless:
+  // the crop solver reasons about a frame shape that does not exist, and
+  // `.extract()` then fails outright or lifts the wrong region.
+  const transposed = meta.orientation >= 5 && meta.orientation <= 8
+  const srcW = transposed ? meta.height : meta.width
+  const srcH = transposed ? meta.width : meta.height
+
   const scale = Math.min(1, long / Math.max(srcW, srcH))
   const w = Math.max(8, Math.round(srcW * scale))
   const h = Math.max(8, Math.round(srcH * scale))
@@ -140,6 +149,11 @@ export async function loadProxy(input, long = 512) {
     .removeAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true })
+
+  // How much of the frame is actually see-through. Analysis flattens onto white,
+  // but the renderer needs to know, because a transparent region encoded to JPEG
+  // without flattening comes out solid black.
+  const alpha = meta.hasAlpha ? await measureTransparency(image, w, h) : { hasAlpha: false, fraction: 0 }
 
   const n = w * h
   const luma = new Grid(w, h)
@@ -158,7 +172,11 @@ export async function loadProxy(input, long = 512) {
   }
 
   return {
+    // `meta.width`/`meta.height` are the stored values; use `source` for the
+    // orientation-corrected dimensions that the pixels actually have.
     meta,
+    orientation: { value: meta.orientation ?? 1, transposed },
+    alpha,
     source: { w: srcW, h: srcH },
     proxy: { w, h, scale },
     rgb,
@@ -168,6 +186,24 @@ export async function loadProxy(input, long = 512) {
     /** Convert proxy-space coords to source-space. */
     toSource: (r) => ({ x: r.x / scale, y: r.y / scale, w: r.w / scale, h: r.h / scale }),
     toProxy: (r) => ({ x: r.x * scale, y: r.y * scale, w: r.w * scale, h: r.h * scale }),
+  }
+}
+
+/** Fraction of the frame that is fully or partly transparent. */
+async function measureTransparency(image, w, h) {
+  const { data } = await image
+    .clone()
+    .resize(w, h, { fit: 'fill', kernel: 'nearest' })
+    .ensureAlpha()
+    .extractChannel(3)
+    .raw()
+    .toBuffer({ resolveWithObject: true })
+
+  let transparent = 0
+  for (let i = 0; i < data.length; i++) if (data[i] < 250) transparent++
+  return {
+    hasAlpha: transparent > 0,
+    fraction: Math.round((transparent / Math.max(1, data.length)) * 1000) / 1000,
   }
 }
 

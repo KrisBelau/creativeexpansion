@@ -13,6 +13,9 @@
 import sharp from 'sharp'
 import { rect, roundRect, right, bottom } from '../solver/geometry.js'
 
+/** Encodings that can carry an alpha channel. JPEG cannot. */
+const ALPHA_CAPABLE = new Set(['png', 'webp'])
+
 export async function renderImage({
   input,
   placement,
@@ -21,14 +24,22 @@ export async function renderImage({
   encoding = 'auto',
   byteCeiling = null,
   targetRatio = 0.9,
+  flattenColour = '#ffffff',
 }) {
   const canvas = placement.canvas
-  let pipeline
+  const allowed = placement.image?.encodings ?? ['jpg', 'png']
+  const format = pickFormat(encoding, allowed, placement)
 
+  // Decide the flatten colour up front, because it has to be applied to the
+  // source *before* any geometry. Without this, transparent areas of a master
+  // encode to solid black in JPEG — a transparent top band in a Figma or
+  // Illustrator export comes out looking like the image was cropped away.
+  const flatten = ALPHA_CAPABLE.has(format) ? null : flattenColour
+
+  let pipeline
   if (transform.kind === 'crop') {
     const crop = roundRect(transform.crop)
-    pipeline = sharp(input, { failOn: 'none' })
-      .rotate()
+    pipeline = sourcePipeline(input, flatten)
       .extract({ left: Math.max(0, crop.x), top: Math.max(0, crop.y), width: crop.w, height: crop.h })
       .resize(canvas.w, canvas.h, {
         fit: 'fill',
@@ -37,34 +48,42 @@ export async function renderImage({
         fastShrinkOnLoad: false,
       })
   } else {
-    pipeline = await composeFit({ input, placement, transform, extension })
+    pipeline = await composeFit({ input, placement, transform, extension, flatten })
   }
 
   const scaleFactor = scaleOf(transform, canvas)
   pipeline = applySharpening(pipeline, scaleFactor)
   pipeline = pipeline.toColourspace('srgb').withMetadata({ icc: 'srgb' })
 
-  return encodeToCeiling({ pipeline, placement, encoding, byteCeiling, targetRatio })
+  return encodeToCeiling({ pipeline, placement, format, byteCeiling, targetRatio, flattenColour })
+}
+
+/**
+ * The source, oriented and (optionally) flattened. `.rotate()` with no argument
+ * applies the EXIF orientation; every stage must call it or coordinates diverge.
+ */
+function sourcePipeline(input, flatten) {
+  const p = sharp(input, { failOn: 'none' }).rotate()
+  return flatten ? p.flatten({ background: flatten }) : p
 }
 
 /* ------------------------------------------------------------ fit + extend */
 
-async function composeFit({ input, placement, transform, extension }) {
+async function composeFit({ input, placement, transform, extension, flatten }) {
   const canvas = placement.canvas
   const placed = roundRect(transform.placed)
 
-  const scaled = await sharp(input, { failOn: 'none' })
-    .rotate()
+  const scaled = await sourcePipeline(input, flatten)
     .resize(placed.w, placed.h, { fit: 'fill', kernel: 'lanczos3', fastShrinkOnLoad: false })
     .png()
     .toBuffer()
 
-  const background = await buildBackground({ input, placement, extension, placed })
+  const background = await buildBackground({ input, placement, extension, placed, flatten })
 
   return sharp(background).composite([{ input: scaled, left: placed.x, top: placed.y }])
 }
 
-async function buildBackground({ input, placement, extension, placed }) {
+async function buildBackground({ input, placement, extension, placed, flatten }) {
   const canvas = placement.canvas
   const strategy = extension?.strategy ?? 'matte'
 
@@ -73,8 +92,7 @@ async function buildBackground({ input, placement, extension, placed }) {
     // the sharp fitted copy sit on top.
     const sigma = extension.blur?.sigma ?? Math.max(8, Math.min(canvas.w, canvas.h) * 0.035)
     const darken = extension.blur?.darken ?? 0.88
-    return sharp(input, { failOn: 'none' })
-      .rotate()
+    return sourcePipeline(input, flatten)
       .resize(canvas.w, canvas.h, { fit: 'cover', kernel: 'lanczos3', position: 'centre' })
       .blur(sigma)
       .modulate({ brightness: darken })
@@ -84,8 +102,7 @@ async function buildBackground({ input, placement, extension, placed }) {
 
   if (strategy === 'mirror') {
     // libvips can extend by reflection in one operation.
-    return sharp(input, { failOn: 'none' })
-      .rotate()
+    return sourcePipeline(input, flatten)
       .resize(placed.w, placed.h, { fit: 'fill', kernel: 'lanczos3', fastShrinkOnLoad: false })
       .extend({
         top: placed.y,
@@ -189,9 +206,8 @@ function applySharpening(pipeline, scaleFactor) {
  * Reports what it had to do, so a mushy result is a finding rather than a
  * silent quality loss.
  */
-async function encodeToCeiling({ pipeline, placement, encoding, byteCeiling, targetRatio }) {
+async function encodeToCeiling({ pipeline, placement, format, byteCeiling, targetRatio, flattenColour = '#ffffff' }) {
   const allowed = placement.image?.encodings ?? ['jpg', 'png']
-  const format = pickFormat(encoding, allowed, placement)
   const notes = []
 
   if (!byteCeiling) {
@@ -212,7 +228,9 @@ async function encodeToCeiling({ pipeline, placement, encoding, byteCeiling, tar
         severity: 'info',
         message: `PNG was ${kb(png.length)} against a ${kb(target)} target; switched to JPEG.`,
       })
-      return searchJpeg(pipeline, target, byteCeiling, notes)
+      // The pipeline may still carry alpha — it was built for a PNG target.
+      // JPEG cannot, and unflattened alpha encodes to black.
+      return searchJpeg(pipeline.clone().flatten({ background: flattenColour }), target, byteCeiling, notes)
     }
     // Fall back to a palette PNG.
     const paletted = await pipeline.clone().png({ palette: true, quality: 80, effort: 8 }).toBuffer()

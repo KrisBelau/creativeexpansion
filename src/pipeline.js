@@ -22,6 +22,10 @@ export const DEFAULT_POLICY = {
   upscaleLimit: 2.0,
   anchorBias: 'auto',
   matteColour: null,
+  // What transparent areas become when the placement requires JPEG. White is
+  // what a designer almost always intends and, more importantly, it is obviously
+  // wrong when it isn't — unlike black, which reads as missing image.
+  flattenColour: '#ffffff',
   onBlocked: 'flag',
 }
 
@@ -128,6 +132,7 @@ async function renderOne({ input, placement, analysis, policy, override, recipe 
       extension,
       encoding: override.encoding ?? 'auto',
       byteCeiling: byteCeiling(placement),
+      flattenColour: override.flattenColour ?? policy.flattenColour,
     })
   } catch (err) {
     return {
@@ -153,6 +158,29 @@ async function renderOne({ input, placement, analysis, policy, override, recipe 
   }
 
   findings.push(...(rendered.notes ?? []))
+
+  if (analysis.alpha?.hasAlpha && analysis.alpha.fraction > 0.01 && rendered.format === 'jpg') {
+    const colour = override.flattenColour ?? policy.flattenColour
+    findings.push({
+      code: 'transparency_flattened',
+      severity: 'warn',
+      message: `${Math.round(analysis.alpha.fraction * 100)}% of the master is transparent and ${placement.name} requires JPEG, so those areas were flattened onto ${colour}. Check that this is the ground the design assumes.`,
+    })
+  }
+
+  // Cropping throws pixels away. If detection missed a piece of type, this is the
+  // only signal a reviewer gets that something left the frame — so say it plainly
+  // rather than leaving it implied by a retention percentage.
+  if (transform.kind === 'crop') {
+    const kept = (transform.crop.w * transform.crop.h) / (analysis.source.w * analysis.source.h)
+    if (kept < 0.75) {
+      findings.push({
+        code: 'crop_discarded_content',
+        severity: 'warn',
+        message: `Cropping to ${placement.aspect} discarded ${Math.round((1 - kept) * 100)}% of the master. Everything detected is inside the frame, but confirm nothing undetected was cut — check the region overlay on the master.`,
+      })
+    }
+  }
 
   // --- contrast, measured on the real pixels -------------------------------
   const sampler = await makeContrastSampler(rendered.buffer)

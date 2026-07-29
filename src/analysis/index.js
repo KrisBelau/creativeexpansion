@@ -60,12 +60,15 @@ export async function analyse(input, { brandKit = null, logoReference = null } =
   return {
     engineVersion: ENGINE_VERSION,
     source,
+    format: salProxy.meta.format ?? null,
     proxies: { saliency: salProxy.proxy, text: textProxy.proxy },
     maps: { saliency, busyness },
     regions,
     background,
     palette,
     logo: logo ?? { found: false, bestScore: 0, reason: 'no reference supplied' },
+    alpha: salProxy.alpha,
+    orientation: salProxy.orientation,
     quality: await qualityGate(input, salProxy, textRegions, background),
   }
 }
@@ -180,6 +183,22 @@ async function qualityGate(input, proxy, textRegions, background) {
       code: 'source_low_density',
       severity: 'info',
       message: `Reported density ${meta.density} dpi.`,
+    })
+  }
+
+  if (proxy.alpha.hasAlpha && proxy.alpha.fraction > 0.01) {
+    findings.push({
+      code: 'source_has_transparency',
+      severity: 'warn',
+      message: `${Math.round(proxy.alpha.fraction * 100)}% of the master is transparent. Placements that require JPEG cannot carry an alpha channel, so those areas are flattened onto white — set a flatten colour in the recipe if the design expects a different ground.`,
+    })
+  }
+
+  if (proxy.orientation.transposed) {
+    findings.push({
+      code: 'source_exif_rotated',
+      severity: 'info',
+      message: `The file stores EXIF orientation ${proxy.orientation.value}, so its real dimensions are ${proxy.source.w}x${proxy.source.h} rather than the ${meta.width}x${meta.height} recorded in the header. Working from the rotated pixels.`,
     })
   }
 

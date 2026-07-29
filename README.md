@@ -76,6 +76,12 @@ Currently **100 placements across 16 platforms** (74 accept still images): Meta,
 (all 27 IAB sizes), Google responsive asset sets, YouTube, TikTok, Snapchat, Pinterest,
 LinkedIn, X, Reddit, Amazon, CTV/OTT, digital audio, Microsoft, DOOH and email.
 
+## Input formats
+
+JPEG, PNG, WebP, TIFF, GIF, AVIF and SVG all work, in any aspect ratio, with or without an
+alpha channel, and EXIF orientation is honoured. There is no format restriction beyond the
+`MAX_UPLOAD_MB` file-size limit, which returns a clear 413 when exceeded.
+
 ## Working with the registry
 
 Edit `data/formats.json`, then regenerate the catalog:
@@ -103,6 +109,9 @@ These are honest gaps, not oversights — see SPEC §17 for the open questions b
 - **Logo protection needs a reference image.** Without one there is no reliable way to tell a
   brand mark from any other graphic, so the output says `logo_not_verified` rather than
   implying a guarantee it cannot make.
+- **Transparency is flattened, not preserved,** on any placement that requires JPEG — which is
+  most of them. It flattens onto white by default (`policy.flattenColour`) and says so in the
+  findings. If your master's design assumes a different ground, set that colour.
 - **No persistence.** Sources and batches live in process memory; SPEC §13 specifies Postgres
   and object storage.
 - **The legibility floors are defensible defaults, not measured findings.** They are the spine
