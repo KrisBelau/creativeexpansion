@@ -16,7 +16,8 @@ import { dirname, join, basename, extname } from 'node:path'
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
 
 import { catalog, presets, placements, legibility, resolvePlacements } from './registry.js'
-import { analyse } from './analysis/index.js'
+import { coverage } from './solver/geometry.js'
+import { analyse, measureRegions } from './analysis/index.js'
 import { runBatch } from './pipeline.js'
 import { buildArchive, buildManifest, BlockedExportError } from './export.js'
 
@@ -158,7 +159,10 @@ app.post('/api/sources', upload.fields([{ name: 'source' }, { name: 'logo' }]), 
     }
 
     const id = randomUUID()
-    const analysis = await analyse(buffer, { logoReference: logo })
+    // Detection is not run on upload. It is heuristic, and having it silently
+    // decide what the ad is made of means every user starts by auditing a guess.
+    // Marking regions is the default; auto-detect is an action.
+    const analysis = await analyse(buffer, { logoReference: logo, detect: false })
 
     while (sources.size >= MAX_SOURCES) sources.delete(sources.keys().next().value)
     sources.set(id, {
@@ -166,14 +170,51 @@ app.post('/api/sources', upload.fields([{ name: 'source' }, { name: 'logo' }]), 
       filename,
       analysis,
       logo,
-      // Kept so an edit is undoable. Re-running detection would be equivalent but
-      // costs seconds, and a reset button that is slow is a reset button nobody
-      // trusts enough to use.
-      autoRegions: structuredClone(analysis.regions),
-      autoFindings: structuredClone(analysis.quality.findings),
+      baseFindings: structuredClone(analysis.quality.findings),
+      autoRegions: null,
+      autoFindings: null,
     })
 
     res.json({ id, filename, analysis: publicAnalysis(analysis) })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+/**
+ * Run auto-detect on demand and merge what it finds into whatever is already
+ * marked. Merging rather than replacing: someone who has marked three elements by
+ * hand and then asks for help should not lose that work, and a detected box that
+ * lands on top of a hand-marked one is the detector duplicating a human's decision,
+ * not adding to it.
+ */
+app.post('/api/sources/:id/detect', async (req, res) => {
+  const src = sources.get(req.params.id)
+  if (!src) return res.status(404).json({ error: 'Unknown source.' })
+
+  try {
+    const fresh = await analyse(src.buffer, { logoReference: src.logo, detect: true })
+    const manual = src.analysis.regions.filter((r) => r.source === 'human')
+
+    const added = fresh.regions.filter(
+      (d) => !manual.some((m) => coverage(m.box, d.box) > 0.4 || coverage(d.box, m.box) > 0.4)
+    )
+    const skipped = fresh.regions.length - added.length
+
+    src.analysis.regions = [...manual, ...added].sort((a, b) => a.box.y - b.box.y)
+    src.analysis.detected = true
+    src.analysis.logo = fresh.logo
+    src.analysis.quality = fresh.quality
+    src.autoRegions = structuredClone(fresh.regions)
+    src.autoFindings = structuredClone(fresh.quality.findings)
+    src.analysis.regionsEdited = manual.length > 0
+
+    res.json({
+      analysis: publicAnalysis(src.analysis),
+      added: added.length,
+      kept: manual.length,
+      skipped,
+    })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -194,7 +235,7 @@ app.get('/api/sources/:id/image', (req, res) => {
  * correction point in the product (SPEC 6.1), so edits replace the auto regions
  * and are marked as human-sourced, which exempts them from confidence downgrades.
  */
-app.put('/api/sources/:id/regions', (req, res) => {
+app.put('/api/sources/:id/regions', async (req, res) => {
   const src = sources.get(req.params.id)
   if (!src) return res.status(404).json({ error: 'Unknown source.' })
   const incoming = req.body?.regions
@@ -202,7 +243,12 @@ app.put('/api/sources/:id/regions', (req, res) => {
   if (incoming.length > 200) return res.status(400).json({ error: 'Too many regions.' })
 
   try {
-    src.analysis.regions = incoming.map((r, i) => normaliseRegion(r, i))
+    const normalised = incoming.map((r, i) => normaliseRegion(r, i))
+    // Derive cap height, contrast, plate and lift box from the pixels rather than
+    // trusting the client. A drawn box carries geometry and intent; everything
+    // measurable has to come from the image, or manual regions would skip the
+    // legibility rules that are the point of the tool.
+    src.analysis.regions = await measureRegions(src.buffer, normalised)
   } catch (err) {
     return res.status(400).json({ error: err.message })
   }
@@ -213,12 +259,19 @@ app.put('/api/sources/:id/regions', (req, res) => {
 })
 
 /** Undo every region edit and restore what detection originally produced. */
+/** Clear every region, or restore the last auto-detect result if there was one. */
 app.post('/api/sources/:id/regions/reset', (req, res) => {
   const src = sources.get(req.params.id)
   if (!src) return res.status(404).json({ error: 'Unknown source.' })
-  src.analysis.regions = structuredClone(src.autoRegions)
-  src.analysis.quality.findings = structuredClone(src.autoFindings)
+  const toDetected = req.body?.to === 'detected' && src.autoRegions
+
+  src.analysis.regions = toDetected ? structuredClone(src.autoRegions) : []
+  src.analysis.quality.findings = structuredClone(
+    toDetected ? src.autoFindings : src.baseFindings
+  )
   src.analysis.regionsEdited = false
+  if (!toDetected) src.analysis.detected = false
+  pruneStaleFindings(src, toDetected ? src.autoFindings : src.baseFindings)
   res.json({ analysis: publicAnalysis(src.analysis) })
 })
 
@@ -240,7 +293,15 @@ function normaliseRegion(r, i) {
     type,
     role: type === 'text' ? role : (r.role ?? null),
     box: { x: nums[0], y: nums[1], w: nums[2], h: nums[3] },
-    capHeight: Number.isFinite(Number(r.capHeight)) ? Number(r.capHeight) : nums[3] * 0.72,
+    // Only type has a cap height. Defaulting it for every kind made a product
+    // region report "cap 233px", which is meaningless and invites the reader to
+    // trust a number the legibility rules never consult for that type.
+    capHeight:
+      type === 'text'
+        ? Number.isFinite(Number(r.capHeight))
+          ? Number(r.capHeight)
+          : nums[3] * 0.72
+        : null,
     protection: PROTECTIONS.has(r.protection) ? r.protection : 'protected',
     source: human ? 'human' : 'auto',
     // A region a human vouched for is not a guess, so it must not be softened by
@@ -256,15 +317,17 @@ function normaliseRegion(r, i) {
  * deleted, and a stale warning about type that no longer exists is worse than no
  * warning at all.
  */
-function pruneStaleFindings(src) {
+function pruneStaleFindings(src, base = null) {
+  const source = base ?? src.autoFindings ?? src.baseFindings ?? []
   const live = new Set(src.analysis.regions.map((r) => r.id))
-  src.analysis.quality.findings = src.autoFindings.filter((f) => !f.regionRef || live.has(f.regionRef))
+  src.analysis.quality.findings = source.filter((f) => !f.regionRef || live.has(f.regionRef))
 
   const textRegions = src.analysis.regions.filter((r) => r.type === 'text')
   const uncertain = textRegions.filter((r) => r.confidence < 0.45).length
-  src.analysis.quality.findings = src.analysis.quality.findings.filter(
-    (f) => f.code !== 'text_detection_uncertain' && f.code !== 'no_text_detected'
-  )
+  // These three are all statements about the current region set, so they are
+  // rebuilt from scratch on every edit rather than filtered.
+  const rebuilt = new Set(['text_detection_uncertain', 'no_text_detected', 'no_regions_yet'])
+  src.analysis.quality.findings = src.analysis.quality.findings.filter((f) => !rebuilt.has(f.code))
   if (uncertain) {
     src.analysis.quality.findings.push({
       code: 'text_detection_uncertain',
@@ -274,9 +337,9 @@ function pruneStaleFindings(src) {
   }
   if (!textRegions.length) {
     src.analysis.quality.findings.push({
-      code: 'no_text_detected',
-      severity: 'info',
-      message: 'No type regions remain. Nothing is protected from being cropped through.',
+      code: 'no_regions_yet',
+      severity: 'warn',
+      message: 'No type regions marked. Nothing is protected, so a crop may cut straight through the copy.',
     })
   }
 }
@@ -458,6 +521,7 @@ function publicAnalysis(analysis) {
     alpha: analysis.alpha ?? null,
     orientation: analysis.orientation ?? null,
     regionsEdited: Boolean(analysis.regionsEdited),
+    detected: Boolean(analysis.detected),
     regions: analysis.regions.map((r) => ({
       id: r.id,
       type: r.type,
@@ -469,6 +533,8 @@ function publicAnalysis(analysis) {
       source: r.source,
       sourceContrast: r.sourceContrast ?? null,
       lineCount: r.lineCount ?? null,
+      capHeightSource: r.capHeightSource ?? null,
+      onPlate: r.onPlate ?? null,
     })),
     background: {
       classification: analysis.background.classification,

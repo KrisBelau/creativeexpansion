@@ -43,9 +43,25 @@
         </div>
 
         <div class="source-view hidden" id="sourceView">
+          <div class="toolbar">
+            <span class="tool-label">Draw</span>
+            <button class="tool on" data-tool="text">Text</button>
+            <select id="drawRole" title="Role for the next box you draw">
+              <option value="headline">headline</option>
+              <option value="subhead">subhead</option>
+              <option value="body">body</option>
+              <option value="cta">cta</option>
+              <option value="price">price</option>
+              <option value="legal">legal</option>
+            </select>
+            <button class="tool" data-tool="logo">Logo</button>
+            <button class="tool" data-tool="product">Product</button>
+          </div>
+
           <div class="canvas-wrap">
             <canvas id="sourceCanvas"></canvas>
           </div>
+
           <div class="source-meta">
             <div class="row"><span>File</span><b id="srcName">—</b></div>
             <div class="row"><span>Pixels</span><b id="srcDims">—</b></div>
@@ -53,15 +69,18 @@
             <div class="row"><span>Logo</span><b id="srcLogo">—</b></div>
             <div class="row"><span>Palette</span><span id="srcPalette" class="swatches"></span></div>
 
-            <h3>Detected regions <button class="link small" id="toggleOverlay">hide overlay</button></h3>
+            <h3>Regions <button class="link small" id="toggleOverlay">hide overlay</button></h3>
             <ul class="regions" id="regionList"></ul>
             <div id="regionActions"></div>
             <p class="note">
-              <b>Click a region on the master</b> to select its row — click again to cycle through
-              anything stacked underneath, and press <kbd>Delete</kbd> to remove it. Change a role
-              to select which legibility floor applies. Removing a region the detector got wrong
-              matters: a false positive on busy artwork otherwise constrains every crop and
-              reports findings against type that isn't there.
+              <b>Drag on the master</b> to mark an element with the tool above. Drag inside a
+              selected box to move it, or its corners to resize. <kbd>Delete</kbd> removes the
+              selected one.
+            </p>
+            <p class="note">
+              Auto-detect is a shortcut, not the default: it misses outline and script faces and
+              finds type in busy artwork, so it proposes regions for you to correct rather than
+              deciding what the ad is made of. It never overwrites anything you marked by hand.
             </p>
 
             <div id="sourceFindings"></div>

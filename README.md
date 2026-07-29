@@ -10,9 +10,9 @@ hard constraints: **an output that would be unreadable is flagged and blocked, n
 
 ## Status
 
-Phase 1 works end to end for still images: upload a master, review the detected regions, fan it
-out across up to 74 image placements, and export a ZIP with a manifest. Video needs `ffmpeg`
-and is Phase 3.
+Phase 1 works end to end for still images: upload a master, mark its elements (by hand, or let
+auto-detect propose them), fan it out across up to 74 image placements, and export a ZIP with a
+manifest. Video needs `ffmpeg` and is Phase 3.
 
 ```bash
 npm install
@@ -33,16 +33,21 @@ node scripts/run-batch.mjs samples/master-flat-1x1.png \
   --preset meta-fanout --preset gdn-iab-core --zip
 ```
 
-`npm test` runs 32 tests, including the invariants that an identity transform can never block on
+`npm test` runs 52 tests, including the invariants that an identity transform can never block on
 type size, that aspect ratio is never distorted, and that a blocked output cannot reach an
 archive.
 
 ## What it does
 
-1. **Analyses** the master — saliency, text regions grouped into typographic blocks with roles
-   (headline / subhead / body / CTA / price / legal), logo location against a brand-kit
-   reference, per-edge background statistics, palette, and a source quality gate.
-2. **Solves** geometry per placement, preferring the track that damages the composition least:
+1. **Analyses** the master — per-edge background statistics, ground classification, palette,
+   saliency and a source quality gate. All measurement, no interpretation.
+2. **You mark the elements.** Drag on the master to mark a headline, subhead, body, CTA, price,
+   legal line, logo or product; drag to move, corners to resize. **Auto-detect is a button, not
+   the default** — the detector is heuristic, so it proposes regions for you to correct rather
+   than deciding what the ad is made of, and it never overwrites anything you marked by hand.
+   Either way the server derives cap height, contrast and plate membership from the pixels, so a
+   hand-drawn region is measured identically to a detected one.
+3. **Solves** geometry per placement, preferring the track that damages the composition least:
    - **Protected crop** — the master's own composition, untouched. Never cuts through type, a
      logo or a product.
    - **Element re-layout** — when no crop fits, each detected element is lifted as its own sprite
@@ -52,10 +57,10 @@ archive.
      elements that do not overlap (rectangular sprites cannot separate overlapping ones).
    - **Fit with background extension** — last resort. Preserves everything, at a scale that often
      kills the type; usually ends up blocked, correctly.
-3. **Measures** legibility against the floors for that placement's viewing context, and contrast
+4. **Measures** legibility against the floors for that placement's viewing context, and contrast
    against the pixels actually rendered.
-4. **Blocks** anything that fails, with a plain-language reason and a suggested fix.
-5. **Exports** the rest with a manifest recording exactly how each asset was made.
+5. **Blocks** anything that fails, with a plain-language reason and a suggested fix.
+6. **Exports** the rest with a manifest recording exactly how each asset was made.
 
 The distinction that makes it usable: **blocked means the output is defective as produced**;
 a defect faithfully inherited from the master — contrast, or type that is already below the
@@ -71,7 +76,7 @@ brand-colour decision blocks an entire fan-out.
 | [`data/formats.json`](data/formats.json) | Format registry. Single source of truth. |
 | [`data/legibility.json`](data/legibility.json) | The numeric floors from SPEC §7, machine-readable |
 | [`data/presets.json`](data/presets.json) | Named placement bundles |
-| `src/analysis/` | Saliency, text detection, background classification, logo matching |
+| `src/analysis/` | Saliency, background classification, palette, opt-in text/logo detection, pixel measurement of drawn regions |
 | `src/solver/` | Crop search, background extension, legibility enforcement |
 | `src/render/` | Resampling, encoding, byte-ceiling targeting, contrast sampling |
 | `src/validate/` | Preflight rules |
@@ -112,11 +117,10 @@ These are honest gaps, not oversights — see SPEC §17 for the open questions b
   re-places them, which needs no text recognition — but it cannot re-flow a line to a new
   measure. A wide legal line stays wide, and that is what blocks most small banners. Reading the
   words is what would fix it, and it is the single biggest quality lever still on the table.
-- **Text detection is heuristic** and misses outline and script faces while occasionally
-  finding type in busy photography. So the region list lets you retype or remove anything it got
-  wrong, with one click to restore the detected set, and low-confidence regions warn rather than
-  block. You cannot yet *draw* a region the detector missed entirely — that is the next gap, and
-  it matters more than removal, because undetected type is type a crop will cut straight through.
+- **Text detection is heuristic**, which is why it is opt-in rather than the default: it misses
+  outline and script faces and finds type in busy photography. Marking regions by hand is the
+  primary path and is fully supported (draw, move, resize, retype, remove). Low-confidence
+  detections warn rather than block, and never constrain the layout.
 - **Logo protection needs a reference image.** Without one there is no reliable way to tell a
   brand mark from any other graphic, so the output says `logo_not_verified` rather than
   implying a guarantee it cannot make.

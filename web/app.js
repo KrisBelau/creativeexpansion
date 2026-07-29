@@ -25,7 +25,13 @@ const state = {
   selectedId: null,
   hitBoxes: [], // region boxes in canvas pixel space, for click testing
   lastClick: null, // for cycling through stacked regions
+  tool: 'text', // what the next drawn box will be
+  drag: null, // in-flight draw / move / resize
+  scale: 1, // canvas pixels per source pixel
 }
+
+/** Corner handles on the selected region, in canvas pixels. */
+const HANDLE = 9
 
 const ROLES = ['headline', 'subhead', 'body', 'cta', 'price', 'legal']
 
@@ -58,6 +64,17 @@ async function init() {
   document.addEventListener('keydown', (e) => e.key === 'Escape' && closeDrawer())
   wireCanvas()
   wireRegionKeys()
+  wireToolbar()
+}
+
+function wireToolbar() {
+  for (const btn of document.querySelectorAll('.tool')) {
+    btn.onclick = () => {
+      state.tool = btn.dataset.tool
+      for (const b of document.querySelectorAll('.tool')) b.classList.toggle('on', b === btn)
+      $('drawRole').disabled = state.tool !== 'text'
+    }
+  }
 }
 
 /* ----------------------------------------------------------------- upload */
@@ -172,7 +189,8 @@ function renderRegionList() {
   const edited = state.source.analysis.regionsEdited
 
   if (!regions.length) {
-    $('regionList').innerHTML = `<li class="empty">No regions. Nothing is protected, so a crop may cut through anything.</li>`
+    $('regionList').innerHTML =
+      `<li class="empty">Nothing marked yet — drag on the master to mark an element, or run auto-detect.</li>`
   } else {
     $('regionList').innerHTML = regions
       .map((r) => {
@@ -188,17 +206,27 @@ function renderRegionList() {
         return `<li class="${sel.trim()}" data-id="${escapeHtml(r.id)}">
           ${isText ? `<span class="tag">text</span>` : ''}${roleSelect}${human}
           <span class="conf${r.confidence < 0.45 ? ' low' : ''}" title="detector confidence">${conf}</span>
-          <span class="cap">${r.capHeight ? `cap ${Math.round(r.capHeight)}px` : `${Math.round(r.box.w)}×${Math.round(r.box.h)}`}</span>
+          <span class="cap${r.capHeightSource === 'estimated' ? ' estimated' : ''}"
+                title="${r.capHeightSource === 'estimated' ? 'No type found in this box — cap height is a guess from its height, so the legibility verdict is unreliable' : r.capHeightSource === 'measured' ? 'Measured from the glyphs inside the box' : r.capHeightSource === 'detected' ? 'Taken from the detected type block inside the box' : 'From auto-detect'}"
+          >${r.capHeight ? `cap ${Math.round(r.capHeight)}px` : `${Math.round(r.box.w)}×${Math.round(r.box.h)}`}${r.capHeightSource === 'estimated' ? '?' : ''}</span>
           <button class="del" data-del="${escapeHtml(r.id)}" title="Remove this region (or press Delete when selected)">×</button>
         </li>`
       })
       .join('')
   }
 
-  $('regionActions').innerHTML = edited
-    ? `<button class="link small" id="resetRegions">restore detected regions</button>`
-    : ''
-  if (edited) $('resetRegions').onclick = resetRegions
+  const detected = state.source.analysis.detected
+  $('regionActions').innerHTML = [
+    `<button class="ghost small" id="detectBtn">${detected ? 'Auto-detect again' : 'Auto-detect'}</button>`,
+    regions.length ? `<button class="link small" id="clearRegions">clear all</button>` : '',
+    detected && edited ? `<button class="link small" id="restoreRegions">restore detected</button>` : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+  $('detectBtn').onclick = runDetect
+  if ($('clearRegions')) $('clearRegions').onclick = () => resetRegions('none')
+  if ($('restoreRegions')) $('restoreRegions').onclick = () => resetRegions('detected')
 
   for (const li of $('regionList').querySelectorAll('li[data-id]')) {
     li.onmouseenter = () => {
@@ -281,18 +309,48 @@ async function saveRegions(regions, message) {
   }
 }
 
-async function resetRegions() {
+async function runDetect() {
+  const btn = $('detectBtn')
+  btn.disabled = true
+  btn.innerHTML = '<span class="spinner"></span>Detecting…'
   try {
-    const res = await fetch(`/api/sources/${state.source.id}/regions/reset`, { method: 'POST' })
+    const res = await fetch(`/api/sources/${state.source.id}/detect`, { method: 'POST' })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error ?? 'Auto-detect failed')
+    state.source.analysis = data.analysis
+    state.selectedId = null
+    renderRegionList()
+    renderSourceFindings()
+    drawSource()
+    markStale()
+    const parts = [`Proposed ${data.added} region${data.added === 1 ? '' : 's'}`]
+    if (data.kept) parts.push(`kept your ${data.kept}`)
+    if (data.skipped) parts.push(`skipped ${data.skipped} that overlapped yours`)
+    toast(`${parts.join(', ')}. Check them before rendering.`, 5000)
+  } catch (err) {
+    toast(err.message, 4000, true)
+  } finally {
+    btn.disabled = false
+  }
+}
+
+async function resetRegions(to) {
+  try {
+    const res = await fetch(`/api/sources/${state.source.id}/regions/reset`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ to }),
+    })
     const data = await res.json()
     if (!res.ok) throw new Error(data.error ?? 'Could not reset')
     state.source.analysis = data.analysis
+    state.selectedId = null
     state.regionsDirty = true
     renderRegionList()
     renderSourceFindings()
     drawSource()
     markStale()
-    toast('Restored the detected regions. Re-render to apply.', 2600)
+    toast(to === 'detected' ? 'Restored the detected regions.' : 'Cleared all regions.', 2600)
   } catch (err) {
     toast(err.message, 4000, true)
   }
@@ -325,6 +383,7 @@ function drawSource() {
   const canvas = $('sourceCanvas')
   const maxW = 460
   const scale = Math.min(1, maxW / img.width)
+  state.scale = scale
   canvas.width = Math.round(img.width * scale)
   canvas.height = Math.round(img.height * scale)
 
@@ -374,7 +433,54 @@ function drawSource() {
     } else if (selected) {
       label(ctx, r.type, x, y, colour)
     }
+
+    if (selected) drawHandles(ctx, x, y, w, h)
   }
+
+  // The rectangle currently being dragged out, so drawing has live feedback.
+  if (state.drag?.kind === 'draw' && state.drag.current) {
+    const d = state.drag.current
+    ctx.setLineDash([5, 4])
+    ctx.lineWidth = 1.5
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)'
+    ctx.fillStyle = 'rgba(76,141,255,0.18)'
+    ctx.fillRect(d.x, d.y, d.w, d.h)
+    ctx.strokeRect(d.x, d.y, d.w, d.h)
+    ctx.setLineDash([])
+  }
+}
+
+function drawHandles(ctx, x, y, w, h) {
+  ctx.setLineDash([])
+  for (const [hx, hy] of corners(x, y, w, h)) {
+    ctx.fillStyle = '#ffffff'
+    ctx.strokeStyle = 'rgba(13,27,42,0.9)'
+    ctx.lineWidth = 1
+    ctx.fillRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE)
+    ctx.strokeRect(hx - HANDLE / 2, hy - HANDLE / 2, HANDLE, HANDLE)
+  }
+}
+
+const corners = (x, y, w, h) => [
+  [x, y],
+  [x + w, y],
+  [x, y + h],
+  [x + w, y + h],
+]
+
+/** Which corner of the selected region is under the pointer, if any. */
+function handleAt(pt) {
+  const sel = state.hitBoxes.find((b) => b.id === state.selectedId)
+  if (!sel) return null
+  const names = ['nw', 'ne', 'sw', 'se']
+  const list = corners(sel.x, sel.y, sel.w, sel.h)
+  for (let i = 0; i < list.length; i++) {
+    const [hx, hy] = list[i]
+    if (Math.abs(pt.x - hx) <= HANDLE && Math.abs(pt.y - hy) <= HANDLE) {
+      return { corner: names[i], box: sel }
+    }
+  }
+  return null
 }
 
 function label(ctx, text, x, y, colour) {
@@ -411,49 +517,194 @@ function hitsAt(pt) {
 function wireCanvas() {
   const canvas = $('sourceCanvas')
 
+  canvas.onmousedown = (e) => {
+    if (!state.source) return
+    e.preventDefault()
+    const pt = canvasPoint(e)
+
+    // Resize takes priority over move, and move over drawing — otherwise a box
+    // covering most of the frame would make it impossible to draw anything else.
+    const handle = handleAt(pt)
+    if (handle) {
+      state.drag = { kind: 'resize', corner: handle.corner, id: state.selectedId, origin: pt }
+      return
+    }
+
+    const selected = state.hitBoxes.find((b) => b.id === state.selectedId)
+    const insideSelected =
+      selected &&
+      pt.x >= selected.x &&
+      pt.x <= selected.x + selected.w &&
+      pt.y >= selected.y &&
+      pt.y <= selected.y + selected.h
+    if (insideSelected) {
+      state.drag = { kind: 'move', id: state.selectedId, origin: pt, start: { ...selected } }
+      return
+    }
+
+    state.drag = { kind: 'draw', origin: pt, current: null }
+  }
+
   canvas.onmousemove = (e) => {
     if (!state.source) return
-    const hit = hitsAt(canvasPoint(e))[0]
-    canvas.style.cursor = hit ? 'pointer' : 'default'
+    const pt = canvasPoint(e)
+
+    if (state.drag) {
+      applyDrag(pt)
+      return
+    }
+
+    const handle = handleAt(pt)
+    const hit = hitsAt(pt)[0]
+    canvas.style.cursor = handle
+      ? handle.corner === 'nw' || handle.corner === 'se'
+        ? 'nwse-resize'
+        : 'nesw-resize'
+      : hit
+        ? hit.id === state.selectedId
+          ? 'move'
+          : 'pointer'
+        : 'crosshair'
+
     if ((hit?.id ?? null) !== state.hoverId) {
       state.hoverId = hit?.id ?? null
       drawSource()
     }
   }
 
+  // On window, not the canvas: a drag that leaves the canvas must still finish,
+  // or the region is left half-edited with the mouse already released.
+  window.addEventListener('mousemove', (e) => {
+    if (state.drag && state.source) applyDrag(canvasPoint(e))
+  })
+  window.addEventListener('mouseup', (e) => {
+    if (state.drag && state.source) finishDrag(canvasPoint(e))
+  })
+
   canvas.onmouseleave = () => {
-    if (state.hoverId) {
+    if (state.hoverId && !state.drag) {
       state.hoverId = null
       drawSource()
     }
   }
+}
 
-  canvas.onclick = (e) => {
-    if (!state.source) return
-    const pt = canvasPoint(e)
-    const hits = hitsAt(pt)
-    if (!hits.length) {
-      state.selectedId = null
-      renderRegionList()
+function applyDrag(pt) {
+  const d = state.drag
+  if (d.kind === 'draw') {
+    d.current = normaliseDrag(d.origin, pt)
+    drawSource()
+    return
+  }
+
+  const region = state.source.analysis.regions.find((r) => r.id === d.id)
+  if (!region) return
+  const k = state.scale
+
+  if (d.kind === 'move') {
+    const dx = (pt.x - d.origin.x) / k
+    const dy = (pt.y - d.origin.y) / k
+    region.box = clampToSource({
+      x: d.start.x / k + dx,
+      y: d.start.y / k + dy,
+      w: d.start.w / k,
+      h: d.start.h / k,
+    })
+  } else if (d.kind === 'resize') {
+    const box = state.hitBoxes.find((b) => b.id === d.id)
+    if (!box) return
+    const x0 = d.corner.includes('w') ? pt.x : box.x
+    const y0 = d.corner.includes('n') ? pt.y : box.y
+    const x1 = d.corner.includes('e') ? pt.x : box.x + box.w
+    const y1 = d.corner.includes('s') ? pt.y : box.y + box.h
+    const r = normaliseDrag({ x: x0, y: y0 }, { x: x1, y: y1 })
+    region.box = clampToSource({ x: r.x / k, y: r.y / k, w: r.w / k, h: r.h / k })
+  }
+
+  // The lift box is derived server-side; drop the stale one so the overlay does
+  // not draw a boundary that no longer matches.
+  delete region.liftBox
+  drawSource()
+}
+
+async function finishDrag(pt) {
+  const d = state.drag
+  state.drag = null
+
+  if (d.kind === 'draw') {
+    const r = normaliseDrag(d.origin, pt)
+    // Ignore a click-sized drag: that is a selection attempt, not a new region.
+    if (r.w < 8 || r.h < 8) {
       drawSource()
+      selectFromPoint(pt)
       return
     }
-
-    // Regions overlap constantly — the subject box covers most of the frame, and
-    // type sits inside it. Clicking the same spot again steps down through the
-    // stack rather than being stuck on whatever is smallest.
-    const near =
-      state.lastClick && Math.hypot(pt.x - state.lastClick.x, pt.y - state.lastClick.y) < 6
-    const index = near ? (state.lastClick.index + 1) % hits.length : 0
-    state.lastClick = { x: pt.x, y: pt.y, index }
-
-    state.selectedId = null // force selectRegion to select rather than toggle off
-    selectRegion(hits[index].id)
-    renderRegionList()
-    if (hits.length > 1) {
-      toast(`${hits.length} regions overlap here — click again to cycle.`, 2200)
+    const k = state.scale
+    const box = clampToSource({ x: r.x / k, y: r.y / k, w: r.w / k, h: r.h / k })
+    const region = {
+      id: `manual_${Date.now().toString(36)}`,
+      type: state.tool,
+      role: state.tool === 'text' ? $('drawRole').value : null,
+      box,
+      protection: state.tool === 'product' ? 'protected' : 'immutable',
+      source: 'human',
+      confidence: 1,
     }
+    state.selectedId = region.id
+    await saveRegions([...state.source.analysis.regions, region], `Marked a ${regionLabel(region)}.`)
+    return
   }
+
+  // Move and resize mutated the region in place; persist and re-measure.
+  await saveRegions(state.source.analysis.regions, 'Region updated.')
+}
+
+/** Human name for a region: its role if it is type, else its kind. */
+const regionLabel = (r) => (r.type === 'text' ? r.role : r.type)
+
+/** Order-independent rectangle from two points, in canvas pixels. */
+function normaliseDrag(a, b) {
+  return {
+    x: Math.min(a.x, b.x),
+    y: Math.min(a.y, b.y),
+    w: Math.abs(b.x - a.x),
+    h: Math.abs(b.y - a.y),
+  }
+}
+
+/** Keep a source-space box inside the image and above a usable minimum. */
+function clampToSource(box) {
+  const { w: sw, h: sh } = state.source.analysis.source
+  const w = Math.max(4, Math.min(box.w, sw))
+  const h = Math.max(4, Math.min(box.h, sh))
+  return {
+    x: Math.round(Math.min(Math.max(box.x, 0), sw - w)),
+    y: Math.round(Math.min(Math.max(box.y, 0), sh - h)),
+    w: Math.round(w),
+    h: Math.round(h),
+  }
+}
+
+function selectFromPoint(pt) {
+  const hits = hitsAt(pt)
+  if (!hits.length) {
+    state.selectedId = null
+    renderRegionList()
+    drawSource()
+    return
+  }
+
+  // Regions overlap constantly — the product box covers a lot of frame and type
+  // sits inside it. Clicking the same spot again steps down through the stack
+  // rather than being stuck on whatever is smallest.
+  const near = state.lastClick && Math.hypot(pt.x - state.lastClick.x, pt.y - state.lastClick.y) < 6
+  const index = near ? (state.lastClick.index + 1) % hits.length : 0
+  state.lastClick = { x: pt.x, y: pt.y, index }
+
+  state.selectedId = null // force selectRegion to select rather than toggle off
+  selectRegion(hits[index].id)
+  renderRegionList()
+  if (hits.length > 1) toast(`${hits.length} regions overlap here — click again to cycle.`, 2200)
 }
 
 /** Delete removes the selected region; Escape clears the selection. */

@@ -5,7 +5,7 @@
 import sharp from 'sharp'
 import { loadProxy, contrastRatio } from './pixels.js'
 import { saliencyMap, applyCentrePrior, busynessMap } from './saliency.js'
-import { detectText } from './text.js'
+import { detectText, measureCapHeight } from './text.js'
 import { analyseBackground, extractPalette, toHex } from './background.js'
 import { locateLogo } from './logo.js'
 import { rect, union, area, coverage } from '../solver/geometry.js'
@@ -14,7 +14,16 @@ export const ENGINE_VERSION = '0.1.0'
 const TEXT_PROXY_LONG = 1024
 const SALIENCY_PROXY_LONG = 512
 
-export async function analyse(input, { brandKit = null, logoReference = null } = {}) {
+/**
+ * Analyse a source.
+ *
+ * `detect` is opt-in. Region detection is heuristic — it misses outline and script
+ * faces and invents type in busy artwork — so it is offered as an action a person
+ * takes and reviews, not as something that silently decides what the ad is made
+ * of. Everything else here (ground class, palette, saliency, quality gate) is
+ * measurement rather than interpretation, and always runs.
+ */
+export async function analyse(input, { brandKit = null, logoReference = null, detect = false } = {}) {
   const [salProxy, textProxy] = await Promise.all([
     loadProxy(input, SALIENCY_PROXY_LONG),
     loadProxy(input, TEXT_PROXY_LONG),
@@ -24,7 +33,36 @@ export async function analyse(input, { brandKit = null, logoReference = null } =
   const busyness = busynessMap(salProxy.luma)
   const background = analyseBackground(salProxy)
   const palette = extractPalette(salProxy)
+  const source = salProxy.source
 
+  let regions = []
+  let logo = { found: false, bestScore: 0, reason: 'auto-detect has not been run' }
+
+  if (detect) {
+    const found = await detectRegionsIn({ salProxy, textProxy, saliency, logoReference, brandKit })
+    regions = found.regions
+    logo = found.logo
+  }
+
+  return {
+    engineVersion: ENGINE_VERSION,
+    source,
+    format: salProxy.meta.format ?? null,
+    proxies: { saliency: salProxy.proxy, text: textProxy.proxy },
+    maps: { saliency, busyness },
+    regions,
+    detected: detect,
+    background,
+    palette,
+    logo,
+    alpha: salProxy.alpha,
+    orientation: salProxy.orientation,
+    quality: await qualityGate(input, salProxy, regions, background, detect),
+  }
+}
+
+/** Region detection, separated so it can be invoked on demand. */
+async function detectRegionsIn({ salProxy, textProxy, saliency, logoReference, brandKit }) {
   const detected = detectText(textProxy).map((r) => ({
     ...r,
     box: textProxy.toSource(r.box),
@@ -43,16 +81,16 @@ export async function analyse(input, { brandKit = null, logoReference = null } =
     ? detected.filter((r) => coverage(logoRegion.box, r.box) < 0.7)
     : detected
 
-  // Contrast is scale-invariant, so measure it once here on the master. An output
-  // that fails contrast has almost always inherited the problem rather than been
-  // given it by the resize, and the two cases deserve different severities.
-  for (const r of textRegions) r.sourceContrast = measureContrast(textProxy, r.box)
-
-  // What to lift if this element is ever moved. A detection box is tight to the
-  // ink, but the *element* is bigger: a CTA label sits on a pill, and lifting the
-  // label alone would strand white type on the page colour. Anti-aliased edges
-  // need a margin too.
-  for (const r of textRegions) r.liftBox = liftBoxFor(textProxy, r)
+  for (const r of textRegions) {
+    // Contrast is scale-invariant, so measure it once on the master. An output that
+    // fails contrast has almost always inherited the problem rather than been given
+    // it by the resize, and the two cases deserve different severities.
+    r.sourceContrast = measureContrast(textProxy, r.box)
+    // What to lift if this element is ever moved. A detection box is tight to the
+    // ink, but the *element* is bigger: a CTA label sits on a pill, and lifting the
+    // label alone would strand white type on the page colour.
+    r.liftBox = liftBoxFor(textProxy, r)
+  }
 
   const source = salProxy.source
   const regions = [...textRegions]
@@ -61,8 +99,6 @@ export async function analyse(input, { brandKit = null, logoReference = null } =
     regions.push(logoRegion)
   }
 
-  // The subject region is the saliency mass that is not type: what a crop should
-  // try hardest to keep whole when there is no explicit product mask.
   const subject = deriveSubject(saliency, salProxy, textRegions)
   if (subject) {
     // Saliency finds the high-contrast core of a product, not its full silhouette:
@@ -72,20 +108,110 @@ export async function analyse(input, { brandKit = null, logoReference = null } =
     regions.push(subject)
   }
 
-  return {
-    engineVersion: ENGINE_VERSION,
-    source,
-    format: salProxy.meta.format ?? null,
-    proxies: { saliency: salProxy.proxy, text: textProxy.proxy },
-    maps: { saliency, busyness },
-    regions,
-    background,
-    palette,
-    logo: logo ?? { found: false, bestScore: 0, reason: 'no reference supplied' },
-    alpha: salProxy.alpha,
-    orientation: salProxy.orientation,
-    quality: await qualityGate(input, salProxy, textRegions, background),
+  return { regions, logo: logo ?? { found: false, bestScore: 0, reason: 'no reference supplied' } }
+}
+
+/**
+ * Derive everything measurable about a set of hand-drawn or edited regions.
+ *
+ * A person drawing a box supplies its geometry and its role; they cannot supply a
+ * cap height, a contrast ratio or whether the type sits on a button. Deriving all
+ * of that from the pixels here is what makes a manual region carry exactly the
+ * same weight in the legibility rules as a detected one — otherwise manual mode
+ * would be a second-class path that quietly skips the checks.
+ */
+export async function measureRegions(input, regions) {
+  const textProxy = await loadProxy(input, TEXT_PROXY_LONG)
+  const source = textProxy.source
+  const scale = textProxy.proxy.scale
+
+  // Run the detector's own line-and-block grouping once, and let a drawn box
+  // adopt the cap height of any type block it contains.
+  //
+  // The alternative — measuring glyph components directly inside the drawn
+  // rectangle — is a second heuristic that disagrees with the first: on a
+  // three-line headline it read 59px against detection's 78px, because pooling
+  // glyphs across lines shifts the percentile. Two numbers for the same type is
+  // worse than either number being imperfect, since the floors are applied to
+  // both. Direct measurement stays as the fallback for type the detector cannot
+  // see at all, which is exactly the case manual mode exists for.
+  const blocks = detectText(textProxy).map((b) => ({
+    box: textProxy.toSource(b.box),
+    capHeight: b.capHeight / scale,
+  }))
+
+  return regions.map((r) => {
+    const out = { ...r }
+    if (r.type === 'text') {
+      const inside = blocks.filter((b) => coverage(r.box, b.box) > 0.6)
+      if (inside.length) {
+        const heights = inside.map((b) => b.capHeight).sort((a, b) => a - b)
+        out.capHeight = heights[Math.floor(heights.length / 2)]
+        out.capHeightSource = 'detected'
+      } else {
+        const measured = measureCapHeight(textProxy, textProxy.toProxy(r.box))
+        out.capHeight = measured ? measured / scale : r.box.h * 0.72
+        out.capHeightSource = measured ? 'measured' : 'estimated'
+      }
+      out.sourceContrast = measureContrast(textProxy, r.box)
+      out.onPlate = detectPlate(textProxy, r)
+      out.liftBox = liftBoxFor(textProxy, out)
+    } else if (r.type === 'logo') {
+      out.liftBox = padBox(r.box, source, 0.55)
+    } else {
+      out.liftBox = padBox(r.box, source, 0.14, { basis: 'short', max: 90 })
+    }
+    return out
+  })
+}
+
+/** Is this type sitting on a solid contrasting plate (a button)? */
+function detectPlate(proxy, region) {
+  const b = proxy.toProxy(region.box)
+  const pad = Math.min(8, Math.max(2, Math.round(b.h * 0.18)))
+  const ring = ringMedian(proxy, b, pad)
+  if (!ring) return false
+  const page = pageColour(proxy)
+  const fromPage = Math.hypot(ring[0] - page[0], ring[1] - page[1], ring[2] - page[2])
+  const spread = ringSpread(proxy, b, pad, ring)
+  return spread < 26 && fromPage > 45
+}
+
+function pageColour(proxy) {
+  const { w, h } = proxy.proxy
+  const k = Math.max(4, Math.round(Math.min(w, h) * 0.05))
+  const acc = [0, 0, 0, 0]
+  for (const [sx, sy] of [[0, 0], [w - k, 0], [0, h - k], [w - k, h - k]]) {
+    for (let y = sy; y < sy + k; y++) {
+      for (let x = sx; x < sx + k; x++) {
+        const i = (y * w + x) * 3
+        acc[0] += proxy.rgb[i]
+        acc[1] += proxy.rgb[i + 1]
+        acc[2] += proxy.rgb[i + 2]
+        acc[3]++
+      }
+    }
   }
+  return acc[3] ? [acc[0] / acc[3], acc[1] / acc[3], acc[2] / acc[3]] : [255, 255, 255]
+}
+
+function ringSpread(proxy, box, pad, mean) {
+  const { w, h } = proxy.proxy
+  const x0 = Math.max(0, Math.floor(box.x - pad))
+  const y0 = Math.max(0, Math.floor(box.y - pad))
+  const x1 = Math.min(w, Math.ceil(box.x + box.w + pad))
+  const y1 = Math.min(h, Math.ceil(box.y + box.h + pad))
+  let sum = 0
+  let n = 0
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      if (x >= box.x && x < box.x + box.w && y >= box.y && y < box.y + box.h) continue
+      const i = (y * w + x) * 3
+      sum += Math.hypot(proxy.rgb[i] - mean[0], proxy.rgb[i + 1] - mean[1], proxy.rgb[i + 2] - mean[2])
+      n++
+    }
+  }
+  return n ? sum / n : 999
 }
 
 /**
@@ -309,7 +435,7 @@ function largestBlob(grid, cut) {
 }
 
 /** SPEC 5.2 — findings, not silent adjustments. */
-async function qualityGate(input, proxy, textRegions, background) {
+async function qualityGate(input, proxy, textRegions, background, detected) {
   const findings = []
   const meta = proxy.meta
 
@@ -383,15 +509,17 @@ async function qualityGate(input, proxy, textRegions, background) {
   }
   if (!textRegions.length) {
     findings.push({
-      code: 'no_text_detected',
-      severity: 'info',
-      message: 'No type detected. If this creative has copy, add the regions manually — undetected type will be cropped through.',
+      code: detected ? 'no_text_detected' : 'no_regions_yet',
+      severity: detected ? 'info' : 'warn',
+      message: detected
+        ? 'Auto-detect found no type. If this creative has copy, mark it manually — undetected type gets cropped through with no warning.'
+        : 'No regions marked yet. Nothing is protected, so a crop may cut straight through the copy. Draw a box around each element, or run auto-detect and correct what it gets wrong.',
     })
   }
 
   // Reported once against the master, because that is where the fix belongs.
   const lowContrast = textRegions.filter(
-    (r) => r.sourceContrast != null && r.sourceContrast < 4.5 && r.confidence >= 0.45
+    (r) => r.sourceContrast != null && r.sourceContrast < 4.5 && (r.confidence ?? 1) >= 0.45
   )
   for (const r of lowContrast) {
     findings.push({

@@ -38,6 +38,63 @@ export function detectText(proxy) {
   return classify(blocks, proxy)
 }
 
+/**
+ * Cap height of whatever type is inside a given box, in proxy pixels.
+ *
+ * Used for hand-drawn regions: a person draws a rectangle, and the legibility
+ * rules need to know how tall the letters inside it actually are. Reuses the same
+ * glyph-component logic as detection — the 75th percentile of component heights,
+ * because the taller glyphs in a line are its capitals and ascenders — so a drawn
+ * region is measured exactly as a detected one is. Returns null when there is no
+ * type-like ink to measure, and the caller falls back to an estimate.
+ */
+export function measureCapHeight(proxy, box) {
+  const { w, h } = proxy.proxy
+
+  // Sample a little outside the box. Connected components are truncated at the
+  // sampling boundary, and a box drawn tight to the ink has its capitals touching
+  // the top and bottom edges — so measuring the exact rectangle systematically
+  // under-reads the very glyphs that define cap height.
+  const bleed = Math.max(3, Math.round(box.h * 0.25))
+  const x0 = Math.max(0, Math.floor(box.x - bleed))
+  const y0 = Math.max(0, Math.floor(box.y - bleed))
+  const x1 = Math.min(w, Math.ceil(box.x + box.w + bleed))
+  const y1 = Math.min(h, Math.ceil(box.y + box.h + bleed))
+  if (x1 - x0 < 4 || y1 - y0 < 4) return null
+
+  const edges = edgeMap(proxy.luma)
+
+  // The same global threshold detection uses, deliberately. Thresholding against
+  // the box's own edge energy seems more adaptive but is worse: inside a text box
+  // most of the energy *is* the type, so a high local percentile keeps only the
+  // strongest stroke pixels, glyphs fragment, and the percentile of component
+  // heights lands well short. Measured 13.7px against a detected 20.0px on the
+  // same legal line — which would over-report failures on hand-drawn regions.
+  const cut = Math.max(percentile(edges.data, 0.88), 0.05)
+
+  const bw = x1 - x0
+  const bh = y1 - y0
+  const mask = new Uint8Array(bw * bh)
+  for (let y = 0; y < bh; y++) {
+    for (let x = 0; x < bw; x++) {
+      mask[y * bw + x] = edges.data[(y + y0) * w + (x + x0)] >= cut ? 1 : 0
+    }
+  }
+
+  // Filter with the same glyph test detection uses. Without it, periods, dots on
+  // an i and anti-aliasing specks count as glyphs and drag the percentile down —
+  // 16% low on a line of body copy in testing.
+  const heights = components(mask, bw, bh)
+    .filter((c) => isGlyphLike(c, h))
+    // Reject a frame or rule drawn over — but only when it spans *both* axes. A
+    // capital letter in a tightly drawn box legitimately fills the full height,
+    // and rejecting those cost 8% on a headline in testing.
+    .filter((c) => !(c.h > bh * 0.95 && c.w > bw * 0.95))
+    .map((c) => c.h)
+  if (!heights.length) return null
+  return percentileOf(heights, 0.75)
+}
+
 /* ---------------------------------------------------------------- filtering */
 
 function isGlyphLike(c, proxyH) {

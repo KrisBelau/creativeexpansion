@@ -56,7 +56,16 @@ export async function runBatch({ input, recipe, analysis: given = null, onProgre
     .digest('hex')
     .slice(0, 16)
 
-  const analysis = given ?? (await analyse(input, { logoReference: recipe.logoReference ?? null }))
+  // Manual-first applies to the interactive flow, where a person can mark regions
+  // before rendering. A headless batch has no one to ask, so it detects unless told
+  // otherwise — with nothing marked at all, every crop is unconstrained and the
+  // legibility rules have nothing to measure.
+  const analysis =
+    given ??
+    (await analyse(input, {
+      logoReference: recipe.logoReference ?? null,
+      detect: recipe.detect ?? true,
+    }))
 
   const outputs = []
   let done = 0

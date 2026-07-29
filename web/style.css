@@ -90,6 +90,22 @@ main {
 .drop-hint { font-size: 12px; color: var(--ink-2); }
 .drop-hint.muted { margin-top: 12px; color: var(--ink-3); }
 
+.toolbar {
+  display: flex; align-items: center; gap: 5px; margin-bottom: 10px; flex-wrap: wrap;
+}
+.tool-label { font-size: 11px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .06em; margin-right: 3px; }
+.tool {
+  font-size: 12px; padding: 4px 10px; border-radius: 6px; color: var(--ink-2);
+  background: var(--panel-2); border: 1px solid var(--line);
+}
+.tool:hover { border-color: var(--line-2); }
+.tool.on { border-color: var(--accent); color: #9ec1ff; background: rgba(76, 141, 255, 0.1); }
+.toolbar select {
+  background: var(--bg); color: var(--ink); border: 1px solid var(--line-2);
+  border-radius: 6px; padding: 4px 6px; font-size: 11px; font-family: var(--mono);
+}
+.toolbar select:disabled { opacity: .4; }
+
 .canvas-wrap {
   background: #0a0d11; border: 1px solid var(--line); border-radius: 8px;
   padding: 8px; display: grid; place-items: center; margin-bottom: 14px;
@@ -129,6 +145,9 @@ canvas { max-width: 100%; height: auto; display: block; border-radius: 4px; }
   border-radius: 5px; padding: 2px 4px; font-size: 11px;
 }
 .regions .cap { color: var(--ink-3); font-family: var(--mono); font-size: 10px; margin-left: auto; }
+.regions .cap.estimated { color: var(--warn); }
+
+#regionActions { display: flex; gap: 8px; align-items: center; justify-content: flex-end; }
 .regions .conf { color: var(--ink-3); font-family: var(--mono); font-size: 10px; }
 .regions .conf.low { color: var(--warn); }
 .regions .tag.human { background: rgba(63, 185, 80, 0.16); color: #7ee787; }

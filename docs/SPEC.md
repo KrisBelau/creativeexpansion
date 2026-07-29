@@ -9,6 +9,15 @@
 > (§11 now reflects this); and (b) whole-canvas extension strategies must be judged against the
 > largest pad, never per-edge (§6.4).
 >
+> §6.1 has been inverted since first draft. Region detection is opt-in rather than automatic,
+> and marking regions by hand is the default path. The spec assumed detection would be good
+> enough to correct at the margins; it is not, and a tool that opens by asking you to audit a
+> guess is worse than one that asks you to mark five boxes. Detection remains as a shortcut that
+> proposes regions and never overwrites hand-marked ones. Crucially, cap height and contrast for
+> a drawn region are derived from the pixels server-side, so manual and detected regions carry
+> identical weight in the legibility rules — otherwise manual mode would quietly skip the checks
+> that are the point of the product. Headless batches still detect, since no one is there to mark.
+>
 > §6.3 is now partly built. Element re-layout lifts each detected element's real pixels and
 > re-places them for the target canvas, which needs no OCR — but without the words it cannot
 > re-flow a line to a new measure, so wide copy stays wide. It is gated on a reconstructable

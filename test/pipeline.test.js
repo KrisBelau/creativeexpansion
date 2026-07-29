@@ -9,7 +9,7 @@ import { buildFilename } from '../src/naming.js'
 import { validateSet, stateOf } from '../src/validate/rules.js'
 import { buildManifest, buildArchive, BlockedExportError } from '../src/export.js'
 import { runBatch } from '../src/pipeline.js'
-import { analyse } from '../src/analysis/index.js'
+import { analyse, measureRegions } from '../src/analysis/index.js'
 import { canRelayout, planLayout } from '../src/solver/layout.js'
 
 /* --------------------------------------------------------------- registry */
@@ -254,7 +254,7 @@ describe('pipeline', () => {
 
   test('analysis is reusable across batches', async () => {
     const input = await legibleMaster()
-    const analysis = await analyse(input)
+    const analysis = await analyse(input, { detect: true })
     const batch = await runBatch({ input, recipe: { placements: ['meta_feed_square'] }, analysis })
     assert.equal(batch.outputs.length, 1)
     assert.equal(batch.analysis.regions.length, analysis.regions.length)
@@ -374,7 +374,7 @@ describe('element re-layout', () => {
 
   test('a flat separable master is eligible and re-lays-out rather than letterboxing', async () => {
     const input = await separable()
-    const analysis = await analyse(input)
+    const analysis = await analyse(input, { detect: true })
     assert.equal(canRelayout(analysis).eligible, true, JSON.stringify(canRelayout(analysis)))
 
     const batch = await runBatch({ input, analysis, recipe: { placements: ['meta_stories'] } })
@@ -393,7 +393,7 @@ describe('element re-layout', () => {
       <rect x="500" y="300" width="300" height="400" rx="20" fill="#0d1b2a"/>
       <text x="80" y="520" font-family="DejaVu Sans" font-size="80" font-weight="bold" fill="#0d1b2a">Across the product</text>
     </svg>`
-    const analysis = await analyse(await sharp(Buffer.from(svg)).png().toBuffer())
+    const analysis = await analyse(await sharp(Buffer.from(svg)).png().toBuffer(), { detect: true })
     const verdict = canRelayout(analysis)
     assert.equal(verdict.eligible, false)
     assert.match(verdict.reason, /overlap/)
@@ -402,13 +402,13 @@ describe('element re-layout', () => {
   test('a photographic ground disqualifies re-layout', async () => {
     // Lifting an element off a photo leaves a hole that cannot be filled without
     // inventing detail, so the honest fallback is fit-with-extension.
-    const analysis = await analyse(readFileSync('samples/master-photo-16x9.png'))
+    const analysis = await analyse(readFileSync('samples/master-photo-16x9.png'), { detect: true })
     assert.equal(canRelayout(analysis).eligible, false)
   })
 
   test('re-layout never scales elements non-uniformly', async () => {
     const input = await separable()
-    const analysis = await analyse(input)
+    const analysis = await analyse(input, { detect: true })
     const batch = await runBatch({ input, analysis, recipe: { placements: ['meta_stories'] } })
     const [out] = batch.outputs
     const source = new Map(analysis.regions.map((r) => [r.id, r.liftBox ?? r.box]))
@@ -423,7 +423,7 @@ describe('element re-layout', () => {
 
   test('the legal line is only droppable when the recipe allows it', async () => {
     const input = await separable()
-    const analysis = await analyse(input)
+    const analysis = await analyse(input, { detect: true })
     // Inject a wide legal line that cannot meet its floor on a small banner.
     const withLegal = {
       ...analysis,
@@ -458,6 +458,123 @@ describe('element re-layout', () => {
   })
 })
 
+/* ------------------------------------------------------------- manual mode */
+
+describe('manual regions', () => {
+  async function master() {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080">
+      <rect width="1080" height="1080" fill="#f4f1ea"/>
+      <text x="80" y="300" font-family="DejaVu Sans" font-size="110" font-weight="bold" fill="#0d1b2a">Built to</text>
+      <text x="80" y="420" font-family="DejaVu Sans" font-size="110" font-weight="bold" fill="#0d1b2a">last.</text>
+      <text x="80" y="1030" font-family="DejaVu Sans" font-size="22" fill="#5b6b7a">Terms apply. See northwind.example for details.</text>
+    </svg>`
+    return sharp(Buffer.from(svg)).png().toBuffer()
+  }
+
+  test('detection is off by default and reports that nothing is protected', async () => {
+    const analysis = await analyse(await master())
+    assert.deepEqual(analysis.regions, [])
+    assert.equal(analysis.detected, false)
+    const finding = analysis.quality.findings.find((f) => f.code === 'no_regions_yet')
+    assert.ok(finding, 'must warn that nothing is marked')
+    assert.equal(finding.severity, 'warn')
+  })
+
+  test('a hand-drawn box is measured from the pixels, not trusted', async () => {
+    const input = await master()
+    // A loosely drawn box around the headline. No cap height, contrast or plate
+    // information is supplied — all of it has to come from the image.
+    const drawn = [
+      {
+        id: 'manual_1',
+        type: 'text',
+        role: 'headline',
+        box: { x: 60, y: 180, w: 500, h: 270 },
+        source: 'human',
+        confidence: 1,
+      },
+    ]
+    const [measured] = await measureRegions(input, drawn)
+    assert.ok(measured.capHeight > 40, `cap height not measured: ${measured.capHeight}`)
+    assert.ok(['detected', 'measured'].includes(measured.capHeightSource), measured.capHeightSource)
+    assert.ok(measured.sourceContrast > 4.5, `contrast not measured: ${measured.sourceContrast}`)
+    assert.ok(measured.liftBox, 'a lift box must be derived for anything movable')
+  })
+
+  test('a drawn box and a detected box agree on cap height', async () => {
+    // Two heuristics reporting different sizes for the same type would mean the
+    // legibility floors apply differently depending on how a region was created.
+    const input = await master()
+    const auto = await analyse(input, { detect: true })
+    const detected = auto.regions.filter((r) => r.type === 'text')
+    assert.ok(detected.length, 'need detected type for this comparison')
+
+    const asDrawn = detected.map((r) => ({
+      id: r.id,
+      type: 'text',
+      role: r.role,
+      box: r.box,
+      source: 'human',
+      confidence: 1,
+    }))
+    for (const m of await measureRegions(input, asDrawn)) {
+      const original = detected.find((r) => r.id === m.id)
+      const error = Math.abs(m.capHeight - original.capHeight) / original.capHeight
+      assert.ok(error < 0.02, `${m.role}: drawn ${m.capHeight} vs detected ${original.capHeight}`)
+    }
+  })
+
+  test('measurement is stable however loosely the box is drawn', async () => {
+    const input = await master()
+    const tight = { x: 80, y: 205, w: 470, h: 230 }
+    const loose = { x: 55, y: 180, w: 520, h: 280 }
+    const mk = (box) => [{ id: 'x', type: 'text', role: 'headline', box, source: 'human', confidence: 1 }]
+    const [a] = await measureRegions(input, mk(tight))
+    const [b] = await measureRegions(input, mk(loose))
+    assert.ok(
+      Math.abs(a.capHeight - b.capHeight) / a.capHeight < 0.05,
+      `tight ${a.capHeight} vs loose ${b.capHeight}`
+    )
+  })
+
+  test('only type carries a cap height', async () => {
+    const input = await master()
+    const regions = [
+      { id: 'p', type: 'product', box: { x: 700, y: 600, w: 200, h: 200 }, source: 'human', confidence: 1 },
+      { id: 'l', type: 'logo', box: { x: 80, y: 80, w: 240, h: 60 }, source: 'human', confidence: 1 },
+    ]
+    for (const m of await measureRegions(input, regions)) {
+      assert.equal(m.capHeight ?? null, null, `${m.type} should have no cap height`)
+      assert.ok(m.liftBox, `${m.type} still needs a lift box`)
+    }
+  })
+
+  test('manual regions drive the pipeline exactly as detected ones do', async () => {
+    const input = await master()
+    const drawn = await measureRegions(input, [
+      { id: 'h', type: 'text', role: 'headline', box: { x: 80, y: 205, w: 470, h: 230 }, source: 'human', confidence: 1 },
+      { id: 'lg', type: 'text', role: 'legal', box: { x: 80, y: 1008, w: 860, h: 28 }, source: 'human', confidence: 1 },
+    ])
+    const base = await analyse(input)
+    const batch = await runBatch({
+      input,
+      analysis: { ...base, regions: drawn },
+      recipe: { placements: ['gdn_320x50'] },
+    })
+    const [out] = batch.outputs
+    // A 320x50 cannot carry this type; the floors must fire on hand-marked regions.
+    assert.equal(out.state, 'blocked')
+    assert.ok(out.measurements.length, 'manual regions must be measured')
+    assert.ok(out.findings.some((f) => f.code.startsWith('type_below_floor')))
+  })
+
+  test('a headless batch still detects, since no one is there to mark regions', async () => {
+    const batch = await runBatch({ input: await master(), recipe: { placements: ['meta_feed_square'] } })
+    assert.ok(batch.analysis.regions.length > 0, 'CLI batches must protect something')
+    assert.equal(batch.analysis.detected, true)
+  })
+})
+
 /* ------------------------------------------------------------ region edits */
 
 describe('region edits', () => {
@@ -475,7 +592,7 @@ describe('region edits', () => {
     // cannot be removed is a finding that cannot be resolved — which is why the
     // review UI has to be able to delete, not just retype.
     const input = await master()
-    const analysis = await analyse(input)
+    const analysis = await analyse(input, { detect: true })
     const text = analysis.regions.filter((r) => r.type === 'text')
     assert.ok(text.length >= 2, 'need at least two text regions for this test')
 
@@ -497,7 +614,7 @@ describe('region edits', () => {
 
   test('removing every text region frees the crop solver', async () => {
     const input = await master()
-    const analysis = await analyse(input)
+    const analysis = await analyse(input, { detect: true })
 
     const stripped = { ...analysis, regions: analysis.regions.filter((r) => r.type !== 'text') }
     const batch = await runBatch({ input, analysis: stripped, recipe: { placements: ['gdn_728x90'] } })
@@ -518,7 +635,7 @@ describe('region edits', () => {
     // detector might be wrong. A human who confirmed the region removes that
     // excuse, so the same geometry must block.
     const input = await master()
-    const analysis = await analyse(input)
+    const analysis = await analyse(input, { detect: true })
     const tiny = {
       id: 'tiny',
       type: 'text',
