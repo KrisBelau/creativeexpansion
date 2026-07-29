@@ -1,0 +1,514 @@
+{
+  "catalogVersion": "2026.07.0",
+  "updatedOn": "2026-07-29",
+  "note": "Single source of truth for every output format the resizer supports. docs/FORMAT-CATALOG.md is generated from this file by scripts/gen-catalog.mjs — edit this file, never the markdown. Every placement carries verifiedOn + docs so drift is auditable; platform specs change without notice and any entry older than 90 days is surfaced as stale in the admin UI.",
+  "units": {
+    "canvas": "pixels, the render target the pipeline outputs at 1x",
+    "safeZone": "pixels inset from each edge of the stated canvas; no text, logo, or CTA may enter this band",
+    "maxBytes": "hard platform limit; the encoder targets 90% of this",
+    "loudnessLufs": "integrated program loudness target for the mixed audio track"
+  },
+  "platforms": [
+    {
+      "id": "meta",
+      "name": "Meta — Facebook & Instagram",
+      "docs": "https://www.facebook.com/business/ads-guide",
+      "verifiedOn": "2026-07-29",
+      "placements": [
+        {
+          "id": "meta_feed_square",
+          "name": "Feed — Square",
+          "surfaces": ["Facebook Feed", "Instagram Feed", "Facebook Marketplace"],
+          "media": ["image", "video"],
+          "aspect": "1:1",
+          "canvas": { "w": 1080, "h": 1080 },
+          "minCanvas": { "w": 600, "h": 600 },
+          "safeZone": { "top": 0, "right": 0, "bottom": 0, "left": 0 },
+          "image": { "maxBytes": 31457280, "encodings": ["jpg", "png"] },
+          "video": {
+            "maxBytes": 4294967296,
+            "minSec": 1,
+            "maxSec": 241,
+            "recommendedSec": [5, 15],
+            "container": ["mp4", "mov"],
+            "codecs": ["h264", "h265"],
+            "fps": [23, 60],
+            "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 }
+          },
+          "notes": [
+            "Highest-volume placement; treat as the primary master when the brief does not say otherwise.",
+            "Feed crops nothing, but the caption block sits below — do not duplicate caption copy in-image."
+          ]
+        },
+        {
+          "id": "meta_feed_portrait",
+          "name": "Feed — Portrait",
+          "surfaces": ["Facebook Feed", "Instagram Feed"],
+          "media": ["image", "video"],
+          "aspect": "4:5",
+          "canvas": { "w": 1080, "h": 1350 },
+          "minCanvas": { "w": 600, "h": 750 },
+          "safeZone": { "top": 0, "right": 0, "bottom": 0, "left": 0 },
+          "image": { "maxBytes": 31457280, "encodings": ["jpg", "png"] },
+          "video": {
+            "maxBytes": 4294967296,
+            "minSec": 1,
+            "maxSec": 241,
+            "recommendedSec": [5, 15],
+            "container": ["mp4", "mov"],
+            "codecs": ["h264", "h265"],
+            "fps": [23, 60],
+            "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 }
+          },
+          "notes": ["Tallest ratio the feed will render without centre-cropping; wins the most screen height on mobile."]
+        },
+        {
+          "id": "meta_stories",
+          "name": "Stories",
+          "surfaces": ["Instagram Stories", "Facebook Stories"],
+          "media": ["image", "video"],
+          "aspect": "9:16",
+          "canvas": { "w": 1080, "h": 1920 },
+          "minCanvas": { "w": 500, "h": 889 },
+          "safeZone": { "top": 250, "right": 60, "bottom": 340, "left": 60 },
+          "image": { "maxBytes": 31457280, "encodings": ["jpg", "png"] },
+          "video": {
+            "maxBytes": 4294967296,
+            "minSec": 1,
+            "maxSec": 120,
+            "recommendedSec": [5, 15],
+            "container": ["mp4", "mov"],
+            "codecs": ["h264", "h265"],
+            "fps": [23, 60],
+            "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 }
+          },
+          "notes": [
+            "Profile row and progress bar occupy the top band; the CTA sticker and 'Sponsored' label occupy the bottom band.",
+            "Background must reach all four edges — the platform does not letterbox, it stretches or bars."
+          ]
+        },
+        {
+          "id": "meta_reels",
+          "name": "Reels",
+          "surfaces": ["Instagram Reels", "Facebook Reels"],
+          "media": ["video"],
+          "aspect": "9:16",
+          "canvas": { "w": 1080, "h": 1920 },
+          "minCanvas": { "w": 500, "h": 889 },
+          "safeZone": { "top": 250, "right": 200, "bottom": 500, "left": 60 },
+          "video": {
+            "maxBytes": 4294967296,
+            "minSec": 1,
+            "maxSec": 90,
+            "recommendedSec": [5, 15],
+            "container": ["mp4", "mov"],
+            "codecs": ["h264", "h265"],
+            "fps": [23, 60],
+            "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 }
+          },
+          "notes": [
+            "Most aggressive chrome of any placement: caption, profile, audio ticker and CTA all overlay the frame.",
+            "The right-edge inset covers the like/comment/share rail — a logo lockup placed bottom-right will be obscured."
+          ]
+        },
+        {
+          "id": "meta_instream_video",
+          "name": "In-Stream Video",
+          "surfaces": ["Facebook In-Stream", "Ads on Reels"],
+          "media": ["video"],
+          "aspect": "16:9",
+          "canvas": { "w": 1920, "h": 1080 },
+          "minCanvas": { "w": 1280, "h": 720 },
+          "safeZone": { "top": 0, "right": 0, "bottom": 120, "left": 0 },
+          "video": {
+            "maxBytes": 4294967296,
+            "minSec": 5,
+            "maxSec": 600,
+            "recommendedSec": [5, 15],
+            "container": ["mp4", "mov"],
+            "codecs": ["h264", "h265"],
+            "fps": [23, 60],
+            "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 }
+          },
+          "notes": ["Skip control and countdown sit in the lower band. Sound-on placement — mix for audible playback."]
+        },
+        {
+          "id": "meta_right_column",
+          "name": "Right Column",
+          "surfaces": ["Facebook Right Column (desktop)"],
+          "media": ["image"],
+          "aspect": "1.91:1",
+          "canvas": { "w": 1200, "h": 628 },
+          "minCanvas": { "w": 254, "h": 133 },
+          "safeZone": { "top": 0, "right": 0, "bottom": 0, "left": 0 },
+          "image": { "maxBytes": 31457280, "encodings": ["jpg", "png"] },
+          "notes": [
+            "Renders as small as 254px wide. Any type below the display legibility floor must be dropped, not shrunk."
+          ]
+        },
+        {
+          "id": "meta_carousel",
+          "name": "Carousel Card",
+          "surfaces": ["Facebook Feed", "Instagram Feed", "Stories"],
+          "media": ["image", "video"],
+          "aspect": "1:1",
+          "canvas": { "w": 1080, "h": 1080 },
+          "minCanvas": { "w": 600, "h": 600 },
+          "safeZone": { "top": 0, "right": 0, "bottom": 0, "left": 0 },
+          "image": { "maxBytes": 31457280, "encodings": ["jpg", "png"] },
+          "video": {
+            "maxBytes": 4294967296,
+            "minSec": 1,
+            "maxSec": 240,
+            "recommendedSec": [5, 15],
+            "container": ["mp4", "mov"],
+            "codecs": ["h264", "h265"],
+            "fps": [23, 60],
+            "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 }
+          },
+          "notes": ["All cards in a set must share ratio and canvas; the batch validator enforces set consistency."]
+        }
+      ]
+    },
+    {
+      "id": "google_display",
+      "name": "Google Display Network — Uploaded Display Ads (IAB)",
+      "docs": "https://support.google.com/google-ads/answer/1722096",
+      "verifiedOn": "2026-07-29",
+      "sharedConstraints": {
+        "image": { "maxBytes": 153600, "encodings": ["jpg", "png", "gif"] },
+        "animation": { "maxSec": 30, "maxLoops": 3, "maxFps": 5 },
+        "notes": [
+          "150 KB ceiling applies to every size including animated GIF and HTML5 bundles.",
+          "Border required: ads on a white background need a visible 1px frame."
+        ]
+      },
+      "placements": [
+        { "id": "gdn_300x250", "name": "Medium Rectangle", "media": ["image"], "canvas": { "w": 300, "h": 250 }, "notes": ["Highest-inventory display size."] },
+        { "id": "gdn_336x280", "name": "Large Rectangle", "media": ["image"], "canvas": { "w": 336, "h": 280 } },
+        { "id": "gdn_728x90", "name": "Leaderboard", "media": ["image"], "canvas": { "w": 728, "h": 90 }, "notes": ["Headline-only size; body copy is dropped by the type rules."] },
+        { "id": "gdn_970x90", "name": "Large Leaderboard", "media": ["image"], "canvas": { "w": 970, "h": 90 } },
+        { "id": "gdn_970x250", "name": "Billboard", "media": ["image"], "canvas": { "w": 970, "h": 250 } },
+        { "id": "gdn_300x600", "name": "Half-Page", "media": ["image"], "canvas": { "w": 300, "h": 600 } },
+        { "id": "gdn_300x1050", "name": "Portrait", "media": ["image"], "canvas": { "w": 300, "h": 1050 } },
+        { "id": "gdn_160x600", "name": "Wide Skyscraper", "media": ["image"], "canvas": { "w": 160, "h": 600 } },
+        { "id": "gdn_120x600", "name": "Skyscraper", "media": ["image"], "canvas": { "w": 120, "h": 600 } },
+        { "id": "gdn_468x60", "name": "Banner", "media": ["image"], "canvas": { "w": 468, "h": 60 } },
+        { "id": "gdn_234x60", "name": "Half Banner", "media": ["image"], "canvas": { "w": 234, "h": 60 } },
+        { "id": "gdn_250x250", "name": "Square", "media": ["image"], "canvas": { "w": 250, "h": 250 } },
+        { "id": "gdn_200x200", "name": "Small Square", "media": ["image"], "canvas": { "w": 200, "h": 200 } },
+        { "id": "gdn_180x150", "name": "Small Rectangle", "media": ["image"], "canvas": { "w": 180, "h": 150 } },
+        { "id": "gdn_125x125", "name": "Button", "media": ["image"], "canvas": { "w": 125, "h": 125 }, "notes": ["Logo-only size — the layout solver drops all copy."] },
+        { "id": "gdn_240x400", "name": "Vertical Rectangle", "media": ["image"], "canvas": { "w": 240, "h": 400 } },
+        { "id": "gdn_250x360", "name": "Triple Widescreen", "media": ["image"], "canvas": { "w": 250, "h": 360 } },
+        { "id": "gdn_580x400", "name": "Netboard", "media": ["image"], "canvas": { "w": 580, "h": 400 } },
+        { "id": "gdn_930x180", "name": "Top Banner", "media": ["image"], "canvas": { "w": 930, "h": 180 } },
+        { "id": "gdn_980x120", "name": "Panorama", "media": ["image"], "canvas": { "w": 980, "h": 120 } },
+        { "id": "gdn_320x50", "name": "Mobile Leaderboard", "media": ["image"], "canvas": { "w": 320, "h": 50 }, "notes": ["Smallest supported canvas; logo + 1 short headline only."] },
+        { "id": "gdn_320x100", "name": "Large Mobile Banner", "media": ["image"], "canvas": { "w": 320, "h": 100 } },
+        { "id": "gdn_300x50", "name": "Mobile Banner", "media": ["image"], "canvas": { "w": 300, "h": 50 } },
+        { "id": "gdn_320x480", "name": "Mobile Interstitial — Portrait", "media": ["image"], "canvas": { "w": 320, "h": 480 } },
+        { "id": "gdn_480x320", "name": "Mobile Interstitial — Landscape", "media": ["image"], "canvas": { "w": 480, "h": 320 } },
+        { "id": "gdn_768x1024", "name": "Tablet Interstitial — Portrait", "media": ["image"], "canvas": { "w": 768, "h": 1024 } },
+        { "id": "gdn_1024x768", "name": "Tablet Interstitial — Landscape", "media": ["image"], "canvas": { "w": 1024, "h": 768 } }
+      ]
+    },
+    {
+      "id": "google_ads_assets",
+      "name": "Google Ads — Responsive Asset Sets (RDA, Performance Max, Demand Gen)",
+      "docs": "https://support.google.com/google-ads/answer/7331111",
+      "verifiedOn": "2026-07-29",
+      "placements": [
+        {
+          "id": "goog_asset_landscape",
+          "name": "Marketing Image — Landscape",
+          "media": ["image"],
+          "aspect": "1.91:1",
+          "canvas": { "w": 1200, "h": 628 },
+          "minCanvas": { "w": 600, "h": 314 },
+          "image": { "maxBytes": 5242880, "encodings": ["jpg", "png"] },
+          "notes": ["Required asset. Google crops up to 5% from each edge on some surfaces — keep a 5% content inset."]
+        },
+        {
+          "id": "goog_asset_square",
+          "name": "Marketing Image — Square",
+          "media": ["image"],
+          "aspect": "1:1",
+          "canvas": { "w": 1200, "h": 1200 },
+          "minCanvas": { "w": 300, "h": 300 },
+          "image": { "maxBytes": 5242880, "encodings": ["jpg", "png"] },
+          "notes": ["Required asset."]
+        },
+        {
+          "id": "goog_asset_portrait",
+          "name": "Marketing Image — Portrait",
+          "media": ["image"],
+          "aspect": "4:5",
+          "canvas": { "w": 960, "h": 1200 },
+          "minCanvas": { "w": 480, "h": 600 },
+          "image": { "maxBytes": 5242880, "encodings": ["jpg", "png"] }
+        },
+        {
+          "id": "goog_asset_logo_square",
+          "name": "Logo — Square",
+          "media": ["image"],
+          "aspect": "1:1",
+          "canvas": { "w": 1200, "h": 1200 },
+          "minCanvas": { "w": 128, "h": 128 },
+          "image": { "maxBytes": 5242880, "encodings": ["jpg", "png"] },
+          "notes": ["Transparent PNG preferred. Rendered circular on some surfaces — keep the mark inside an inscribed circle."]
+        },
+        {
+          "id": "goog_asset_logo_landscape",
+          "name": "Logo — Landscape",
+          "media": ["image"],
+          "aspect": "4:1",
+          "canvas": { "w": 1200, "h": 300 },
+          "minCanvas": { "w": 512, "h": 128 },
+          "image": { "maxBytes": 5242880, "encodings": ["jpg", "png"] }
+        },
+        {
+          "id": "goog_asset_video_landscape",
+          "name": "Video — Landscape",
+          "media": ["video"],
+          "aspect": "16:9",
+          "canvas": { "w": 1920, "h": 1080 },
+          "video": { "minSec": 6, "maxSec": 180, "recommendedSec": [10, 30], "container": ["mp4", "mov"], "codecs": ["h264"], "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } }
+        },
+        {
+          "id": "goog_asset_video_square",
+          "name": "Video — Square",
+          "media": ["video"],
+          "aspect": "1:1",
+          "canvas": { "w": 1080, "h": 1080 },
+          "video": { "minSec": 6, "maxSec": 180, "recommendedSec": [10, 30], "container": ["mp4", "mov"], "codecs": ["h264"], "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } }
+        },
+        {
+          "id": "goog_asset_video_vertical",
+          "name": "Video — Vertical",
+          "media": ["video"],
+          "aspect": "9:16",
+          "canvas": { "w": 1080, "h": 1920 },
+          "safeZone": { "top": 200, "right": 60, "bottom": 400, "left": 60 },
+          "video": { "minSec": 6, "maxSec": 180, "recommendedSec": [10, 30], "container": ["mp4", "mov"], "codecs": ["h264"], "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } },
+          "notes": ["Serves into Shorts and Discover — same chrome problem as Reels."]
+        }
+      ]
+    },
+    {
+      "id": "youtube",
+      "name": "YouTube",
+      "docs": "https://support.google.com/google-ads/answer/2375464",
+      "verifiedOn": "2026-07-29",
+      "placements": [
+        {
+          "id": "yt_instream",
+          "name": "In-Stream (skippable & non-skippable)",
+          "media": ["video"],
+          "aspect": "16:9",
+          "canvas": { "w": 1920, "h": 1080 },
+          "safeZone": { "top": 0, "right": 0, "bottom": 140, "left": 0 },
+          "video": { "minSec": 6, "maxSec": 180, "recommendedSec": [15, 30], "container": ["mp4", "mov"], "codecs": ["h264"], "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } },
+          "notes": ["Non-skippable capped at 15–20s by market. Skip button and progress bar sit in the lower band."]
+        },
+        { "id": "yt_bumper", "name": "Bumper", "media": ["video"], "aspect": "16:9", "canvas": { "w": 1920, "h": 1080 }, "video": { "minSec": 1, "maxSec": 6, "recommendedSec": [6, 6], "container": ["mp4"], "codecs": ["h264"], "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } }, "notes": ["6s hard cap — the duration adapter must land a legible end-card inside 6s."] },
+        { "id": "yt_shorts", "name": "Shorts", "media": ["video"], "aspect": "9:16", "canvas": { "w": 1080, "h": 1920 }, "safeZone": { "top": 200, "right": 200, "bottom": 480, "left": 60 }, "video": { "minSec": 1, "maxSec": 60, "recommendedSec": [10, 30], "container": ["mp4"], "codecs": ["h264"], "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } } },
+        { "id": "yt_companion", "name": "Display Companion Banner", "media": ["image"], "canvas": { "w": 300, "h": 60 }, "image": { "maxBytes": 153600, "encodings": ["jpg", "png"] } },
+        { "id": "yt_masthead", "name": "Masthead", "media": ["video"], "aspect": "16:9", "canvas": { "w": 1920, "h": 1080 }, "video": { "minSec": 5, "maxSec": 30, "recommendedSec": [15, 30], "container": ["mp4"], "codecs": ["h264"], "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } }, "notes": ["Autoplays muted — must read without sound."] }
+      ]
+    },
+    {
+      "id": "tiktok",
+      "name": "TikTok",
+      "docs": "https://ads.tiktok.com/help/article/tiktok-ads-specifications",
+      "verifiedOn": "2026-07-29",
+      "placements": [
+        {
+          "id": "tiktok_infeed_vertical",
+          "name": "In-Feed — Vertical",
+          "media": ["video"],
+          "aspect": "9:16",
+          "canvas": { "w": 1080, "h": 1920 },
+          "safeZone": { "top": 130, "right": 140, "bottom": 484, "left": 64 },
+          "video": {
+            "maxBytes": 524288000,
+            "minSec": 5,
+            "maxSec": 60,
+            "recommendedSec": [9, 15],
+            "container": ["mp4", "mov", "mpeg", "avi"],
+            "codecs": ["h264", "h265"],
+            "minBitrateKbps": 516,
+            "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 }
+          },
+          "notes": [
+            "The published safe area is the tightest in market — the bottom band carries the caption, handle, music ticker and CTA.",
+            "Sound-on by default; captions still required for comprehension."
+          ]
+        },
+        { "id": "tiktok_infeed_square", "name": "In-Feed — Square", "media": ["video"], "aspect": "1:1", "canvas": { "w": 1080, "h": 1080 }, "video": { "maxBytes": 524288000, "minSec": 5, "maxSec": 60, "recommendedSec": [9, 15], "container": ["mp4", "mov"], "codecs": ["h264", "h265"], "minBitrateKbps": 516, "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } } },
+        { "id": "tiktok_infeed_landscape", "name": "In-Feed — Landscape", "media": ["video"], "aspect": "16:9", "canvas": { "w": 1920, "h": 1080 }, "video": { "maxBytes": 524288000, "minSec": 5, "maxSec": 60, "recommendedSec": [9, 15], "container": ["mp4", "mov"], "codecs": ["h264", "h265"], "minBitrateKbps": 516, "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } }, "notes": ["Pillarboxed in a vertical feed — deprioritise unless the buy is Pangle."] },
+        { "id": "tiktok_pangle", "name": "Pangle Network", "media": ["video", "image"], "aspect": "9:16", "canvas": { "w": 1080, "h": 1920 }, "video": { "maxBytes": 524288000, "minSec": 5, "maxSec": 60, "recommendedSec": [9, 15], "container": ["mp4"], "codecs": ["h264"], "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } } },
+        { "id": "tiktok_brand_logo", "name": "Brand Logo", "media": ["image"], "aspect": "1:1", "canvas": { "w": 200, "h": 200 }, "image": { "maxBytes": 512000, "encodings": ["jpg", "png"] }, "notes": ["Rendered circular — keep the mark inside an inscribed circle."] }
+      ]
+    },
+    {
+      "id": "snapchat",
+      "name": "Snapchat",
+      "docs": "https://businesshelp.snapchat.com/s/article/ads-specs",
+      "verifiedOn": "2026-07-29",
+      "placements": [
+        {
+          "id": "snap_single",
+          "name": "Single Image or Video Ad",
+          "media": ["image", "video"],
+          "aspect": "9:16",
+          "canvas": { "w": 1080, "h": 1920 },
+          "safeZone": { "top": 150, "right": 64, "bottom": 450, "left": 64 },
+          "image": { "maxBytes": 33554432, "encodings": ["jpg", "png"] },
+          "video": { "maxBytes": 33554432, "minSec": 3, "maxSec": 180, "recommendedSec": [3, 5], "container": ["mp4", "mov"], "codecs": ["h264"], "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } },
+          "notes": ["32 MB ceiling on video is the binding constraint — the encoder drops to a lower bitrate ladder rung here."]
+        },
+        { "id": "snap_collection", "name": "Collection Ad Product Tile", "media": ["image"], "aspect": "1:1", "canvas": { "w": 1080, "h": 1080 }, "image": { "maxBytes": 33554432, "encodings": ["jpg", "png"] } }
+      ]
+    },
+    {
+      "id": "pinterest",
+      "name": "Pinterest",
+      "docs": "https://help.pinterest.com/en/business/article/pinterest-product-specs",
+      "verifiedOn": "2026-07-29",
+      "placements": [
+        { "id": "pin_standard_2x3", "name": "Standard Pin", "media": ["image"], "aspect": "2:3", "canvas": { "w": 1000, "h": 1500 }, "image": { "maxBytes": 20971520, "encodings": ["jpg", "png"] }, "notes": ["2:3 is the only ratio the feed renders uncropped at full height."] },
+        { "id": "pin_square", "name": "Square Pin", "media": ["image"], "aspect": "1:1", "canvas": { "w": 1000, "h": 1000 }, "image": { "maxBytes": 20971520, "encodings": ["jpg", "png"] } },
+        { "id": "pin_video_2x3", "name": "Standard Video Pin", "media": ["video"], "aspect": "2:3", "canvas": { "w": 1000, "h": 1500 }, "video": { "maxBytes": 2147483648, "minSec": 4, "maxSec": 900, "recommendedSec": [6, 15], "container": ["mp4", "mov", "m4v"], "codecs": ["h264", "h265"], "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } } },
+        { "id": "pin_video_maxwidth", "name": "Max-Width Video Pin", "media": ["video"], "aspect": "1:1", "canvas": { "w": 1080, "h": 1080 }, "video": { "maxBytes": 2147483648, "minSec": 4, "maxSec": 900, "recommendedSec": [6, 15], "container": ["mp4", "mov"], "codecs": ["h264", "h265"], "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } }, "notes": ["Spans the full feed width with copy rendered below — no in-image caption needed."] },
+        { "id": "pin_idea", "name": "Idea Pin Page", "media": ["image", "video"], "aspect": "9:16", "canvas": { "w": 1080, "h": 1920 }, "safeZone": { "top": 180, "right": 64, "bottom": 340, "left": 64 }, "image": { "maxBytes": 20971520, "encodings": ["jpg", "png"] }, "video": { "maxBytes": 2147483648, "minSec": 3, "maxSec": 60, "recommendedSec": [6, 15], "container": ["mp4"], "codecs": ["h264"], "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } } }
+      ]
+    },
+    {
+      "id": "linkedin",
+      "name": "LinkedIn",
+      "docs": "https://www.linkedin.com/help/lms/answer/a424483",
+      "verifiedOn": "2026-07-29",
+      "placements": [
+        { "id": "li_single_landscape", "name": "Single Image — Landscape", "media": ["image"], "aspect": "1.91:1", "canvas": { "w": 1200, "h": 628 }, "image": { "maxBytes": 5242880, "encodings": ["jpg", "png"] } },
+        { "id": "li_single_square", "name": "Single Image — Square", "media": ["image"], "aspect": "1:1", "canvas": { "w": 1200, "h": 1200 }, "image": { "maxBytes": 5242880, "encodings": ["jpg", "png"] } },
+        { "id": "li_single_portrait", "name": "Single Image — Portrait", "media": ["image"], "aspect": "4:5", "canvas": { "w": 1200, "h": 1500 }, "image": { "maxBytes": 5242880, "encodings": ["jpg", "png"] }, "notes": ["Mobile-only surface."] },
+        { "id": "li_carousel", "name": "Carousel Card", "media": ["image"], "aspect": "1:1", "canvas": { "w": 1080, "h": 1080 }, "image": { "maxBytes": 10485760, "encodings": ["jpg", "png"] } },
+        { "id": "li_video_landscape", "name": "Video — Landscape", "media": ["video"], "aspect": "16:9", "canvas": { "w": 1920, "h": 1080 }, "video": { "maxBytes": 209715200, "minSec": 3, "maxSec": 1800, "recommendedSec": [15, 30], "container": ["mp4"], "codecs": ["h264"], "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } }, "notes": ["Minimum file size 75 KB — the encoder floor prevents over-compression on flat graphics."] },
+        { "id": "li_video_square", "name": "Video — Square", "media": ["video"], "aspect": "1:1", "canvas": { "w": 1080, "h": 1080 }, "video": { "maxBytes": 209715200, "minSec": 3, "maxSec": 1800, "recommendedSec": [15, 30], "container": ["mp4"], "codecs": ["h264"], "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } } },
+        { "id": "li_video_vertical", "name": "Video — Vertical", "media": ["video"], "aspect": "9:16", "canvas": { "w": 1080, "h": 1920 }, "safeZone": { "top": 160, "right": 64, "bottom": 300, "left": 64 }, "video": { "maxBytes": 209715200, "minSec": 3, "maxSec": 1800, "recommendedSec": [15, 30], "container": ["mp4"], "codecs": ["h264"], "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } } },
+        { "id": "li_spotlight_logo", "name": "Spotlight / Text Ad Logo", "media": ["image"], "aspect": "1:1", "canvas": { "w": 300, "h": 300 }, "image": { "maxBytes": 2097152, "encodings": ["jpg", "png"] }, "notes": ["Also served at 100x100 and 50x50 — logo-only, no type."] }
+      ]
+    },
+    {
+      "id": "x",
+      "name": "X (Twitter)",
+      "docs": "https://business.x.com/en/help/campaign-setup/advertiser-card-specifications.html",
+      "verifiedOn": "2026-07-29",
+      "placements": [
+        { "id": "x_image_landscape", "name": "Image — Landscape", "media": ["image"], "aspect": "16:9", "canvas": { "w": 1600, "h": 900 }, "image": { "maxBytes": 5242880, "encodings": ["jpg", "png"] } },
+        { "id": "x_image_square", "name": "Image — Square", "media": ["image"], "aspect": "1:1", "canvas": { "w": 1200, "h": 1200 }, "image": { "maxBytes": 5242880, "encodings": ["jpg", "png"] } },
+        { "id": "x_image_portrait", "name": "Image — Portrait", "media": ["image"], "aspect": "4:5", "canvas": { "w": 1200, "h": 1500 }, "image": { "maxBytes": 5242880, "encodings": ["jpg", "png"] } },
+        { "id": "x_video_landscape", "name": "Video — Landscape", "media": ["video"], "aspect": "16:9", "canvas": { "w": 1920, "h": 1080 }, "video": { "maxBytes": 536870912, "minSec": 1, "maxSec": 140, "recommendedSec": [6, 15], "container": ["mp4", "mov"], "codecs": ["h264"], "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } } },
+        { "id": "x_video_square", "name": "Video — Square", "media": ["video"], "aspect": "1:1", "canvas": { "w": 1080, "h": 1080 }, "video": { "maxBytes": 536870912, "minSec": 1, "maxSec": 140, "recommendedSec": [6, 15], "container": ["mp4", "mov"], "codecs": ["h264"], "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } } },
+        { "id": "x_video_vertical", "name": "Video — Vertical", "media": ["video"], "aspect": "9:16", "canvas": { "w": 1080, "h": 1920 }, "safeZone": { "top": 120, "right": 64, "bottom": 300, "left": 64 }, "video": { "maxBytes": 536870912, "minSec": 1, "maxSec": 140, "recommendedSec": [6, 15], "container": ["mp4", "mov"], "codecs": ["h264"], "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } } }
+      ]
+    },
+    {
+      "id": "reddit",
+      "name": "Reddit",
+      "docs": "https://business.reddithelp.com/helpcenter/s/article/Ad-formats-and-specs",
+      "verifiedOn": "2026-07-29",
+      "placements": [
+        { "id": "reddit_image_landscape", "name": "Image — Landscape", "media": ["image"], "aspect": "1.91:1", "canvas": { "w": 1200, "h": 628 }, "image": { "maxBytes": 20971520, "encodings": ["jpg", "png", "gif"] } },
+        { "id": "reddit_image_square", "name": "Image — Square", "media": ["image"], "aspect": "1:1", "canvas": { "w": 1080, "h": 1080 }, "image": { "maxBytes": 20971520, "encodings": ["jpg", "png", "gif"] } },
+        { "id": "reddit_video_square", "name": "Video — Square", "media": ["video"], "aspect": "1:1", "canvas": { "w": 1080, "h": 1080 }, "video": { "maxBytes": 1073741824, "minSec": 1, "maxSec": 900, "recommendedSec": [10, 30], "container": ["mp4", "mov"], "codecs": ["h264"], "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } } },
+        { "id": "reddit_video_vertical", "name": "Video — Vertical", "media": ["video"], "aspect": "9:16", "canvas": { "w": 1080, "h": 1920 }, "safeZone": { "top": 140, "right": 64, "bottom": 320, "left": 64 }, "video": { "maxBytes": 1073741824, "minSec": 1, "maxSec": 900, "recommendedSec": [10, 30], "container": ["mp4", "mov"], "codecs": ["h264"], "audio": { "codec": "aac", "minBitrateKbps": 128, "loudnessLufs": -14 } } }
+      ]
+    },
+    {
+      "id": "amazon_ads",
+      "name": "Amazon Ads",
+      "docs": "https://advertising.amazon.com/resources/ad-specs",
+      "verifiedOn": "2026-07-29",
+      "placements": [
+        { "id": "amz_sd_custom_image", "name": "Sponsored Display — Custom Image", "media": ["image"], "aspect": "1.91:1", "canvas": { "w": 1200, "h": 628 }, "minCanvas": { "w": 640, "h": 336 }, "image": { "maxBytes": 5242880, "encodings": ["jpg", "png"] }, "notes": ["No text, logos, or CTAs permitted in the custom image — the validator hard-fails any detected type."] },
+        { "id": "amz_sb_brand_logo", "name": "Brand Logo", "media": ["image"], "aspect": "1:1", "canvas": { "w": 400, "h": 400 }, "image": { "maxBytes": 1048576, "encodings": ["jpg", "png"] } },
+        { "id": "amz_sb_video", "name": "Sponsored Brands Video", "media": ["video"], "aspect": "16:9", "canvas": { "w": 1920, "h": 1080 }, "video": { "maxBytes": 524288000, "minSec": 6, "maxSec": 45, "recommendedSec": [15, 30], "container": ["mp4", "mov"], "codecs": ["h264", "h265"], "audio": { "codec": "aac", "minBitrateKbps": 192, "loudnessLufs": -19 } }, "notes": ["Audio target is quieter than social; -19 LUFS integrated, true peak -2 dBTP."] },
+        { "id": "amz_dsp_300x250", "name": "DSP Display — Medium Rectangle", "media": ["image"], "canvas": { "w": 300, "h": 250 }, "image": { "maxBytes": 204800, "encodings": ["jpg", "png", "gif"] } },
+        { "id": "amz_dsp_728x90", "name": "DSP Display — Leaderboard", "media": ["image"], "canvas": { "w": 728, "h": 90 }, "image": { "maxBytes": 204800, "encodings": ["jpg", "png", "gif"] } },
+        { "id": "amz_dsp_160x600", "name": "DSP Display — Wide Skyscraper", "media": ["image"], "canvas": { "w": 160, "h": 600 }, "image": { "maxBytes": 204800, "encodings": ["jpg", "png", "gif"] } },
+        { "id": "amz_dsp_300x600", "name": "DSP Display — Half-Page", "media": ["image"], "canvas": { "w": 300, "h": 600 }, "image": { "maxBytes": 204800, "encodings": ["jpg", "png", "gif"] } },
+        { "id": "amz_dsp_970x250", "name": "DSP Display — Billboard", "media": ["image"], "canvas": { "w": 970, "h": 250 }, "image": { "maxBytes": 204800, "encodings": ["jpg", "png", "gif"] } },
+        { "id": "amz_dsp_320x50", "name": "DSP Display — Mobile Leaderboard", "media": ["image"], "canvas": { "w": 320, "h": 50 }, "image": { "maxBytes": 204800, "encodings": ["jpg", "png", "gif"] } }
+      ]
+    },
+    {
+      "id": "ctv",
+      "name": "CTV / OTT (DV360, Roku, Amazon, Hulu, Netflix Ads)",
+      "docs": "https://iabtechlab.com/standards/digital-video-ad-format-guidelines/",
+      "verifiedOn": "2026-07-29",
+      "placements": [
+        {
+          "id": "ctv_1080p",
+          "name": "CTV — 1080p",
+          "media": ["video"],
+          "aspect": "16:9",
+          "canvas": { "w": 1920, "h": 1080 },
+          "safeZone": { "top": 54, "right": 96, "bottom": 54, "left": 96 },
+          "video": { "maxBytes": 1073741824, "minSec": 15, "maxSec": 60, "recommendedSec": [15, 30], "container": ["mp4", "mov"], "codecs": ["h264", "prores"], "minBitrateKbps": 15000, "fps": [23.976, 30], "audio": { "codec": "aac", "minBitrateKbps": 192, "loudnessLufs": -24 } },
+          "notes": [
+            "Title-safe inset follows broadcast convention (5% of each edge) — living-room viewing distance and TV overscan both bite.",
+            "Loudness is broadcast spec (-24 LKFS ±2, true peak -2 dBTP), roughly 10 dB quieter than social.",
+            "Minimum legible type is far larger than mobile: 2% of frame height."
+          ]
+        },
+        { "id": "ctv_4k", "name": "CTV — 4K", "media": ["video"], "aspect": "16:9", "canvas": { "w": 3840, "h": 2160 }, "safeZone": { "top": 108, "right": 192, "bottom": 108, "left": 192 }, "video": { "maxBytes": 4294967296, "minSec": 15, "maxSec": 60, "recommendedSec": [15, 30], "container": ["mp4", "mov"], "codecs": ["h264", "h265", "prores"], "minBitrateKbps": 30000, "audio": { "codec": "aac", "minBitrateKbps": 192, "loudnessLufs": -24 } } }
+      ]
+    },
+    {
+      "id": "audio",
+      "name": "Digital Audio (Spotify, Pandora, Podcasts)",
+      "docs": "https://ads.spotify.com/en-US/ad-specs/",
+      "verifiedOn": "2026-07-29",
+      "placements": [
+        { "id": "spotify_companion", "name": "Audio Companion Banner", "media": ["image"], "aspect": "1:1", "canvas": { "w": 640, "h": 640 }, "image": { "maxBytes": 204800, "encodings": ["jpg", "png"] }, "notes": ["Rendered as small as 300x300 — logo plus one short line."] },
+        { "id": "spotify_video_takeover", "name": "Video Takeover", "media": ["video"], "aspect": "16:9", "canvas": { "w": 1920, "h": 1080 }, "video": { "maxBytes": 524288000, "minSec": 15, "maxSec": 30, "recommendedSec": [15, 30], "container": ["mp4", "mov"], "codecs": ["h264"], "audio": { "codec": "aac", "minBitrateKbps": 192, "loudnessLufs": -16 } } }
+      ]
+    },
+    {
+      "id": "microsoft",
+      "name": "Microsoft Advertising",
+      "docs": "https://help.ads.microsoft.com/apex/index/3/en/56900",
+      "verifiedOn": "2026-07-29",
+      "placements": [
+        { "id": "msft_audience_landscape", "name": "Audience Ad — Landscape", "media": ["image"], "aspect": "1.91:1", "canvas": { "w": 1200, "h": 628 }, "image": { "maxBytes": 3145728, "encodings": ["jpg", "png"] } },
+        { "id": "msft_audience_square", "name": "Audience Ad — Square", "media": ["image"], "aspect": "1:1", "canvas": { "w": 1200, "h": 1200 }, "image": { "maxBytes": 3145728, "encodings": ["jpg", "png"] } },
+        { "id": "msft_audience_4x1", "name": "Audience Ad — 4:1", "media": ["image"], "aspect": "4:1", "canvas": { "w": 1200, "h": 300 }, "image": { "maxBytes": 3145728, "encodings": ["jpg", "png"] } },
+        { "id": "msft_audience_portrait", "name": "Audience Ad — Portrait", "media": ["image"], "aspect": "4:5", "canvas": { "w": 960, "h": 1200 }, "image": { "maxBytes": 3145728, "encodings": ["jpg", "png"] } }
+      ]
+    },
+    {
+      "id": "dooh",
+      "name": "DOOH / Place-Based",
+      "docs": "https://iabtechlab.com/standards/digital-out-of-home/",
+      "verifiedOn": "2026-07-29",
+      "placements": [
+        { "id": "dooh_portrait_1080", "name": "Urban Panel — Portrait", "media": ["image", "video"], "aspect": "9:16", "canvas": { "w": 1080, "h": 1920 }, "safeZone": { "top": 96, "right": 54, "bottom": 96, "left": 54 }, "image": { "maxBytes": 10485760, "encodings": ["jpg", "png"] }, "video": { "maxBytes": 268435456, "minSec": 8, "maxSec": 15, "recommendedSec": [10, 10], "container": ["mp4"], "codecs": ["h264"], "notes": ["Silent playback — no audio track."] }, "notes": ["Viewed at 2–5 m: minimum type is 3% of frame height, and no more than 7 words on screen at once."] },
+        { "id": "dooh_landscape_1920", "name": "Screen — Landscape 1080p", "media": ["image", "video"], "aspect": "16:9", "canvas": { "w": 1920, "h": 1080 }, "safeZone": { "top": 54, "right": 96, "bottom": 54, "left": 96 }, "image": { "maxBytes": 10485760, "encodings": ["jpg", "png"] }, "video": { "maxBytes": 268435456, "minSec": 8, "maxSec": 15, "recommendedSec": [10, 10], "container": ["mp4"], "codecs": ["h264"] } },
+        { "id": "dooh_billboard_2x1", "name": "Digital Billboard — 2:1", "media": ["image"], "aspect": "2:1", "canvas": { "w": 2880, "h": 1440 }, "image": { "maxBytes": 20971520, "encodings": ["jpg", "png"] }, "notes": ["Viewed at 30 m+: headline only, minimum type 6% of frame height."] }
+      ]
+    },
+    {
+      "id": "email",
+      "name": "Email & Owned Channels",
+      "docs": "internal",
+      "verifiedOn": "2026-07-29",
+      "placements": [
+        { "id": "email_hero", "name": "Email Hero (2x retina)", "media": ["image"], "aspect": "1.91:1", "canvas": { "w": 1200, "h": 628 }, "image": { "maxBytes": 512000, "encodings": ["jpg", "png"] }, "notes": ["Renders at 600 CSS px — legibility is computed against the 600px display width, not the 1200px canvas."] },
+        { "id": "email_module_square", "name": "Email Module — Square", "media": ["image"], "aspect": "1:1", "canvas": { "w": 1200, "h": 1200 }, "image": { "maxBytes": 512000, "encodings": ["jpg", "png"] } },
+        { "id": "web_og_image", "name": "Open Graph / Social Share", "media": ["image"], "aspect": "1.91:1", "canvas": { "w": 1200, "h": 630 }, "image": { "maxBytes": 5242880, "encodings": ["jpg", "png"] } }
+      ]
+    }
+  ]
+}
