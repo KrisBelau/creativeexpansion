@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Creative Expansion</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%278%27 fill=%27%234c8dff%27/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="mark"></span>
+        <div>
+          <h1>Creative Expansion</h1>
+          <p class="sub" id="catalogLine">loading catalog…</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <span class="legend"><i class="dot pass"></i> pass</span>
+        <span class="legend"><i class="dot warn"></i> warn</span>
+        <span class="legend"><i class="dot blocked"></i> blocked</span>
+      </div>
+    </header>
+
+    <main>
+      <!-- ------------------------------------------------------------ step 1 -->
+      <section class="panel" id="panelSource">
+        <div class="panel-head">
+          <h2><span class="step">1</span> Master</h2>
+        </div>
+
+        <div class="drop" id="drop">
+          <input type="file" id="fileInput" accept="image/*" hidden />
+          <input type="file" id="logoInput" accept="image/*" hidden />
+          <p class="drop-title">Drop an image master here</p>
+          <p class="drop-hint">or <button class="link" id="browseBtn">browse</button> · JPEG, PNG, WebP, TIFF, GIF</p>
+          <p class="drop-hint muted" id="logoLine">
+            <button class="link" id="logoBtn">Add a brand logo reference</button>
+            — enables logo protection
+          </p>
+        </div>
+
+        <div class="source-view hidden" id="sourceView">
+          <div class="canvas-wrap">
+            <canvas id="sourceCanvas"></canvas>
+          </div>
+          <div class="source-meta">
+            <div class="row"><span>File</span><b id="srcName">—</b></div>
+            <div class="row"><span>Pixels</span><b id="srcDims">—</b></div>
+            <div class="row"><span>Ground</span><b id="srcBg">—</b></div>
+            <div class="row"><span>Logo</span><b id="srcLogo">—</b></div>
+            <div class="row"><span>Palette</span><span id="srcPalette" class="swatches"></span></div>
+
+            <h3>Detected regions <button class="link small" id="toggleOverlay">hide overlay</button></h3>
+            <ul class="regions" id="regionList"></ul>
+            <p class="note">
+              Roles drive the legibility floors. Correct one and the rules follow — this is the
+              highest-leverage edit in the tool.
+            </p>
+
+            <div id="sourceFindings"></div>
+            <button class="ghost" id="resetBtn">Start over</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ------------------------------------------------------------ step 2 -->
+      <section class="panel disabled" id="panelFormats">
+        <div class="panel-head">
+          <h2><span class="step">2</span> Formats</h2>
+          <span class="count" id="selectedCount">0 selected</span>
+        </div>
+
+        <div class="presets" id="presets"></div>
+
+        <details class="platforms">
+          <summary>Pick individual placements</summary>
+          <div id="platformList"></div>
+        </details>
+
+        <div class="naming">
+          <label>Brand <input id="metaBrand" value="northwind" /></label>
+          <label>Concept <input id="metaConcept" value="q4-launch" /></label>
+          <label>Version <input id="metaVersion" value="v1" /></label>
+        </div>
+
+        <button class="primary" id="runBtn" disabled>Render</button>
+        <p class="note" id="runNote"></p>
+      </section>
+
+      <!-- ------------------------------------------------------------ step 3 -->
+      <section class="panel disabled" id="panelReview">
+        <div class="panel-head">
+          <h2><span class="step">3</span> Review</h2>
+          <div class="review-actions">
+            <div class="filters" id="filters"></div>
+            <button class="ghost small" id="manifestBtn" disabled>Manifest</button>
+            <button class="primary small" id="exportBtn" disabled>Export ZIP</button>
+          </div>
+        </div>
+
+        <div class="summary" id="summary"></div>
+        <div class="grid" id="grid"></div>
+      </section>
+    </main>
+
+    <!-- detail drawer -->
+    <aside class="drawer" id="drawer">
+      <div class="drawer-head">
+        <div>
+          <h3 id="dTitle">—</h3>
+          <p class="sub" id="dSub">—</p>
+        </div>
+        <button class="icon" id="dClose" aria-label="Close">×</button>
+      </div>
+      <div class="drawer-body">
+        <div class="preview" id="dPreview">
+          <div class="preview-stage" id="dStage"></div>
+        </div>
+        <div class="preview-toggles">
+          <label><input type="checkbox" id="dSafe" checked /> Safe zone</label>
+          <label><input type="checkbox" id="dText" /> Type boxes</label>
+          <label><input type="checkbox" id="dCompare" /> Compare to master</label>
+        </div>
+        <dl class="facts" id="dFacts"></dl>
+        <h4>Findings</h4>
+        <div id="dFindings"></div>
+        <h4>Type measurements</h4>
+        <div id="dMeasure"></div>
+      </div>
+    </aside>
+    <div class="scrim" id="scrim"></div>
+
+    <div class="toast" id="toast"></div>
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

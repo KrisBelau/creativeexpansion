@@ -193,8 +193,10 @@ async function qualityGate(input, proxy, textRegions, background) {
   }
 
   // A JPEG that has been through several generations shows blocking; a rough
-  // proxy for that is high edge energy aligned to the 8px DCT grid.
-  const blockiness = await estimateBlockiness(input)
+  // proxy for that is high edge energy aligned to the 8px DCT grid. Only JPEG
+  // can have it — running the check on PNG or WebP just reports texture and
+  // film grain as compression damage.
+  const blockiness = meta.format === 'jpeg' ? await estimateBlockiness(input) : 0
   if (blockiness > 0.18) {
     findings.push({
       code: 'source_compression_damage',

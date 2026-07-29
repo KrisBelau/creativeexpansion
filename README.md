@@ -10,19 +10,66 @@ hard constraints: **an output that would be unreadable is flagged and blocked, n
 
 ## Status
 
-Specification phase. No implementation yet.
+Phase 1 works end to end for still images: upload a master, review the detected regions, fan it
+out across up to 74 image placements, and export a ZIP with a manifest. Video needs `ffmpeg`
+and is Phase 3.
 
-## Documents
+```bash
+npm install
+npm run sample          # synthesise three test masters into samples/
+npm start               # http://localhost:3000
+```
+
+Or headless:
+
+```bash
+node scripts/run-batch.mjs samples/master-flat-1x1.png \
+  --logo samples/logo-reference.png \
+  --preset meta-fanout --preset gdn-iab-core --zip
+```
+
+`npm test` runs 32 tests, including the invariants that an identity transform can never block on
+type size, that aspect ratio is never distorted, and that a blocked output cannot reach an
+archive.
+
+## What it does
+
+1. **Analyses** the master — saliency, text regions grouped into typographic blocks with roles
+   (headline / subhead / body / CTA / price / legal), logo location against a brand-kit
+   reference, per-edge background statistics, palette, and a source quality gate.
+2. **Solves** geometry per placement — a protected crop that may not cut through type, a logo,
+   or a product; or, when no such crop exists, a fit with the background extended.
+3. **Measures** legibility against the floors for that placement's viewing context, and contrast
+   against the pixels actually rendered.
+4. **Blocks** anything that fails, with a plain-language reason and a suggested fix.
+5. **Exports** the rest with a manifest recording exactly how each asset was made.
+
+The distinction that makes it usable: **blocked means the output is defective as produced**;
+a defect faithfully inherited from the master — contrast, or type that is already below the
+floor at 100% scale — warns instead and is reported once against the source. Otherwise one
+brand-colour decision blocks an entire fan-out.
+
+## Layout
 
 | Path | What it is |
 | --- | --- |
-| [`docs/SPEC.md`](docs/SPEC.md) | The product specification — resize engine, legibility standards, features, architecture, phasing |
-| [`docs/FORMAT-CATALOG.md`](docs/FORMAT-CATALOG.md) | Every supported placement: canvas, safe zone, file ceiling, duration, codec, loudness. **Generated — do not edit.** |
-| [`data/formats.json`](data/formats.json) | The format registry. Single source of truth. |
+| [`docs/SPEC.md`](docs/SPEC.md) | The product specification — engine design, legibility standards, features, phasing |
+| [`docs/FORMAT-CATALOG.md`](docs/FORMAT-CATALOG.md) | Every supported placement. **Generated — do not edit.** |
+| [`data/formats.json`](data/formats.json) | Format registry. Single source of truth. |
+| [`data/legibility.json`](data/legibility.json) | The numeric floors from SPEC §7, machine-readable |
+| [`data/presets.json`](data/presets.json) | Named placement bundles |
+| `src/analysis/` | Saliency, text detection, background classification, logo matching |
+| `src/solver/` | Crop search, background extension, legibility enforcement |
+| `src/render/` | Resampling, encoding, byte-ceiling targeting, contrast sampling |
+| `src/validate/` | Preflight rules |
+| `src/pipeline.js` | Orchestration: source + recipe → outputs |
+| `src/export.js` | ZIP + manifest. The chokepoint that excludes blocked outputs. |
+| `src/server.js` | HTTP layer |
+| `web/` | Review UI |
 
-Currently **100 placements across 16 platforms**: Meta, Google Display (IAB), Google responsive
-asset sets, YouTube, TikTok, Snapchat, Pinterest, LinkedIn, X, Reddit, Amazon, CTV/OTT, digital
-audio, Microsoft, DOOH and email.
+Currently **100 placements across 16 platforms** (74 accept still images): Meta, Google Display
+(all 27 IAB sizes), Google responsive asset sets, YouTube, TikTok, Snapchat, Pinterest,
+LinkedIn, X, Reddit, Amazon, CTV/OTT, digital audio, Microsoft, DOOH and email.
 
 ## Working with the registry
 
@@ -35,3 +82,23 @@ node scripts/gen-catalog.mjs --check   # CI: fail if the markdown is stale
 
 Every placement carries `verifiedOn` and a `docs` link. Platform specs change without notice,
 so entries are treated as stale after 90 days.
+
+## Known limits of this first stab
+
+These are honest gaps, not oversights — see SPEC §17 for the open questions behind them.
+
+- **No face detection.** Photographic sources carry a warning telling you to check crops
+  manually. Saliency stands in, which is not the same thing.
+- **No OCR.** Text regions are located, not read, so the de-flattening track (SPEC §6.3) that
+  re-typesets copy at the correct size is not built. That is the single biggest quality lever
+  still on the table: without it, a flat master's type can only be scaled, never re-set.
+- **Text detection is heuristic** and misses outline and script faces while occasionally
+  finding type in busy photography. Every region is editable in the UI for exactly this reason,
+  and low-confidence regions warn rather than block.
+- **Logo protection needs a reference image.** Without one there is no reliable way to tell a
+  brand mark from any other graphic, so the output says `logo_not_verified` rather than
+  implying a guarantee it cannot make.
+- **No persistence.** Sources and batches live in process memory; SPEC §13 specifies Postgres
+  and object storage.
+- **The legibility floors are defensible defaults, not measured findings.** They are the spine
+  of the whole system and deserve validating against real comprehension testing.

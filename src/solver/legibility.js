@@ -28,9 +28,10 @@ export function checkLegibility({ analysis, placement, transform }) {
   const zone = safeArea(canvas, placement.safeZone)
   const textRegions = analysis.regions.filter((r) => r.type === 'text')
 
+  const scale = scaleOf(transform, canvas)
+
   for (const region of textRegions) {
     const outBox = toOutput(region.box, transform, canvas)
-    const scale = scaleOf(transform, canvas)
     const renderedCap = region.capHeight * scale
     const floor = roleFloor(placement, region.role)
 
@@ -52,17 +53,32 @@ export function checkLegibility({ analysis, placement, transform }) {
     // --- size floor -------------------------------------------------------
     if (renderedCap < floor.minPx) {
       const shortfall = Math.round((1 - renderedCap / floor.minPx) * 100)
-      const severity = region.confidence < 0.45 ? 'warn' : 'blocked'
+
+      // Same principle as the contrast check: blocked means "defective as
+      // produced". If the type was not shrunk, its size is inherited from the
+      // master and the resize did not cause the problem — the master simply has
+      // type too small for this viewing context. Blocking there would fail an
+      // identity transform, which is never the pipeline's fault.
+      const notShrunk = scale >= 0.995
+      let severity = 'blocked'
+      let explanation = suggestion(region, floor, placement)
+      if (notShrunk) {
+        severity = 'warn'
+        explanation = ` The type was not scaled down (${(scale * 100).toFixed(0)}%), so the master itself carries type below this context's floor — the resize did not cause it.`
+      }
+      if (region.confidence < 0.45) {
+        severity = 'warn'
+        explanation = ' Detection confidence is low, so this is a warning — confirm the region.'
+      }
+
       findings.push({
-        code: `type_below_floor_${region.role}`,
+        code: notShrunk ? `type_below_floor_inherited_${region.role}` : `type_below_floor_${region.role}`,
         severity,
         message:
           `${label(region.role)} renders at ${renderedCap.toFixed(1)}px cap height, ${shortfall}% below the ` +
           `${floor.minPx.toFixed(1)}px floor for ${ctx.label}.` +
-          cause(transform, placement) +
-          (severity === 'warn'
-            ? ' Detection confidence is low, so this is a warning — confirm the region.'
-            : suggestion(region, floor, placement)),
+          (notShrunk ? '' : cause(transform, placement)) +
+          explanation,
         regionRef: region.id,
         measurement: m,
         suggestedFix: fixFor(region, floor, placement),
@@ -149,8 +165,18 @@ export function checkLegibility({ analysis, placement, transform }) {
   // Regions already blocked on size: the contrast pass skips these so one defect
   // produces one finding rather than a pile of them.
   const sizeBlocked = new Set(
-    findings.filter((f) => f.severity === 'blocked' && /^type_below_floor|^role_prohibited/.test(f.code)).map((f) => f.regionRef)
+    findings
+      .filter((f) => f.severity === 'blocked' && /^type_below_floor|^role_prohibited/.test(f.code))
+      .map((f) => f.regionRef)
   )
+
+  if (findings.some((f) => f.code.startsWith('type_below_floor_inherited'))) {
+    findings.push({
+      code: 'master_type_below_context_floor',
+      severity: 'warn',
+      message: `One or more elements are below the ${ctx.label} floor in the master itself. Either the master needs larger type for this context, or a region's role is mislabelled — a logo wordmark read as body copy is the usual cause.`,
+    })
+  }
 
   return { findings, measurements, sizeBlocked }
 }

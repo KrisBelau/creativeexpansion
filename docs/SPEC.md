@@ -2,6 +2,14 @@
 
 **Status:** Draft for review · **Version:** 0.1 · **Date:** 2026-07-29
 
+> **Implementation note.** Phase 1 is built and running for still images — see the README for
+> what works and what does not. Where the implementation had to choose, two rules emerged that
+> are worth promoting into this spec: (a) *blocked* means an output is defective as produced,
+> while a defect inherited from the master warns and is reported once against the source
+> (§11 now reflects this); and (b) whole-canvas extension strategies must be judged against the
+> largest pad, never per-edge (§6.4). Face detection, OCR and therefore the whole de-flattening
+> track (§6.3) remain unbuilt.
+
 A web utility that takes finished image and video ad creative and expands it into every
 format a media plan needs — without the output looking resized.
 
@@ -217,6 +225,19 @@ in preference order, gated by the background class from analysis:
 Every extension carries a **seam score**; above threshold, the engine steps down the list.
 Extension is never permitted to cross into a protected region, and never permitted to alter a
 detected product.
+
+Two rules the implementation forced out into the open:
+
+- **Flat and gradient are per-edge; mirror and blur are whole-canvas.** Each edge may pick its
+  own exact fill, but a whole-canvas strategy governs the entire composite and must therefore be
+  judged against the *largest* pad. Judging it per-edge lets a 60px side strip choose blur and
+  hijack a 700px band.
+- **Blur-extend is disqualified by baked-in type.** It reproduces the whole master behind the
+  sharp copy, so any type returns as a smeared but recognisable ghost — unmistakably an artefact.
+  Type-bearing creative steps down to a matte.
+- **Past ~50% pad, stop extending.** Inventing more than half the frame is not extension. A
+  deliberate letterbox on a brand matte drawn from the master's own palette is the honest answer,
+  and it looks composed rather than stretched.
 
 ### 6.5 The layout solver
 
@@ -484,6 +505,15 @@ takes as long as doing it manually.
 
 Runs on every output. Findings are `pass` / `warn` / `blocked`. **Blocked outputs cannot be
 exported** — the single most important rule in the product.
+
+**Blocked vs. warn.** *Blocked* means this output is defective **as produced**: the pipeline's
+own geometry, scaling or encoding created the problem. *Warn* means the output faithfully
+reproduces a defect that was already in the master. The test is whether the transform could have
+caused it — contrast is invariant under uniform scaling, and type size is unchanged at 100%
+scale, so failures of either at those settings are upstream problems. They are reported once
+against the source, where the fix belongs, rather than as a blocker on all forty placements.
+Without this distinction a single off-spec brand colour blocks an entire fan-out, and the tool
+becomes something users route around rather than trust.
 
 **Platform conformance** — dimensions exact, aspect ratio within tolerance, file size under
 ceiling, codec/container/profile allowed, duration in range, frame rate allowed, audio codec
