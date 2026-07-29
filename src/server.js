@@ -9,28 +9,71 @@
  */
 import express from 'express'
 import multer from 'multer'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { dirname, join, basename, extname } from 'node:path'
+import { readdirSync, readFileSync, existsSync } from 'node:fs'
 
-import { catalog, presets, placements, legibility } from './registry.js'
+import { catalog, presets, placements, legibility, resolvePlacements } from './registry.js'
 import { analyse } from './analysis/index.js'
 import { runBatch, summarise } from './pipeline.js'
 import { buildArchive, buildManifest, BlockedExportError } from './export.js'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const app = express()
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 * 1024 } })
+
+/**
+ * Everything is held in memory — sources, rendered buffers, batches — so the
+ * ceilings below are what keep a small instance alive. Render's free and starter
+ * tiers are 512 MB, and one 40-placement batch of a large master can hold well
+ * over 100 MB of pixel buffers at once. Tune with env vars, don't guess.
+ */
+const MAX_UPLOAD_MB = Number(process.env.MAX_UPLOAD_MB ?? 24)
+const MAX_SOURCES = Number(process.env.MAX_SOURCES ?? 4)
+const MAX_BATCHES = Number(process.env.MAX_BATCHES ?? 3)
+const MAX_PLACEMENTS_PER_BATCH = Number(process.env.MAX_PLACEMENTS_PER_BATCH ?? 60)
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024, files: 2 },
+})
+
+/**
+ * Optional gate. A public URL that accepts arbitrary uploads and runs image
+ * analysis on them is an obvious way to burn someone else's CPU quota, so set
+ * ACCESS_PASSWORD on any deployment that is reachable from the internet.
+ */
+const ACCESS_PASSWORD = process.env.ACCESS_PASSWORD
+if (ACCESS_PASSWORD) {
+  app.use((req, res, next) => {
+    if (req.path === '/healthz') return next()
+    const header = req.headers.authorization ?? ''
+    const supplied = header.startsWith('Basic ')
+      ? Buffer.from(header.slice(6), 'base64').toString().split(':').slice(1).join(':')
+      : null
+    if (supplied != null && equalsConstantTime(supplied, ACCESS_PASSWORD)) return next()
+    res.set('WWW-Authenticate', 'Basic realm="Creative Expansion", charset="UTF-8"')
+    res.status(401).send('Authentication required.')
+  })
+}
+
+function equalsConstantTime(a, b) {
+  const bufA = Buffer.from(a)
+  const bufB = Buffer.from(b)
+  if (bufA.length !== bufB.length) return false
+  return timingSafeEqual(bufA, bufB)
+}
 
 app.use(express.json({ limit: '2mb' }))
 app.use(express.static(join(root, 'web')))
+
+/** Liveness probe. Deliberately before the auth gate and free of any work. */
+app.get('/healthz', (req, res) => res.json({ ok: true, engine: catalog.catalogVersion }))
 
 /** sourceId -> { buffer, filename, analysis, logo } */
 const sources = new Map()
 /** batchId -> batch result (buffers included) */
 const batches = new Map()
-
-const MAX_SOURCES = 12
 
 /* ------------------------------------------------------------------ config */
 
@@ -60,19 +103,66 @@ app.get('/api/config', (req, res) => {
 
 /* ------------------------------------------------------------------ upload */
 
+/**
+ * Bundled test masters. A hosted deployment has no CLI to run `npm run sample`
+ * with and no local files to hand, so the UI needs a way to demonstrate itself.
+ * Generated at build time by scripts/make-sample.mjs.
+ */
+const SAMPLE_DIR = join(root, 'samples')
+const LOGO_SAMPLE = 'logo-reference.png'
+
+app.get('/api/samples', (req, res) => {
+  res.json({ samples: listSamples() })
+})
+
+function listSamples() {
+  if (!existsSync(SAMPLE_DIR)) return []
+  return readdirSync(SAMPLE_DIR)
+    .filter((f) => /\.(png|jpe?g|webp)$/i.test(f) && f !== LOGO_SAMPLE)
+    .sort()
+    .map((file) => ({
+      file,
+      label: basename(file, extname(file)).replace(/^master-/, '').replace(/-/g, ' '),
+    }))
+}
+
+/** Reject anything that is not a plain filename in the samples directory. */
+function readSample(name) {
+  if (!name || name !== basename(name)) return null
+  const path = join(SAMPLE_DIR, name)
+  if (!existsSync(path)) return null
+  return readFileSync(path)
+}
+
 app.post('/api/sources', upload.fields([{ name: 'source' }, { name: 'logo' }]), async (req, res) => {
   try {
     const file = req.files?.source?.[0]
-    if (!file) return res.status(400).json({ error: 'No source file supplied.' })
+    const sampleName = req.body?.sample
 
-    const logo = req.files?.logo?.[0]?.buffer ?? null
+    let buffer
+    let filename
+    let logo = req.files?.logo?.[0]?.buffer ?? null
+
+    if (file) {
+      buffer = file.buffer
+      filename = file.originalname
+    } else if (sampleName) {
+      buffer = readSample(sampleName)
+      if (!buffer) return res.status(400).json({ error: `Unknown sample: ${sampleName}` })
+      filename = sampleName
+      // Samples ship with their own brand mark, so logo protection just works.
+      logo ??= readSample(LOGO_SAMPLE)
+    } else {
+      return res.status(400).json({ error: 'No source file supplied.' })
+    }
+
     const id = randomUUID()
-    const analysis = await analyse(file.buffer, { logoReference: logo })
+    const analysis = await analyse(buffer, { logoReference: logo })
 
-    if (sources.size >= MAX_SOURCES) sources.delete(sources.keys().next().value)
-    sources.set(id, { buffer: file.buffer, filename: file.originalname, analysis, logo })
+    while (sources.size >= MAX_SOURCES) sources.delete(sources.keys().next().value)
+    sources.set(id, { buffer, filename, analysis, logo })
 
-    res.json({ id, filename: file.originalname, analysis: publicAnalysis(analysis) })
+    res.json({ id, filename, analysis: publicAnalysis(analysis) })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }
@@ -121,6 +211,15 @@ app.post('/api/batches', async (req, res) => {
       return res.status(400).json({ error: 'Choose at least one preset or placement.' })
     }
 
+    // Guard the instance before doing the work, not after: every rendered buffer
+    // is held in memory until the batch is evicted.
+    const requested = resolvePlacements({ presets: presetIds, placements: placementIds, medium: 'image' })
+    if (requested.length > MAX_PLACEMENTS_PER_BATCH) {
+      return res.status(413).json({
+        error: `${requested.length} placements exceeds this instance's limit of ${MAX_PLACEMENTS_PER_BATCH}. Render fewer at a time, or raise MAX_PLACEMENTS_PER_BATCH on a larger instance.`,
+      })
+    }
+
     const batch = await runBatch({
       input: src.buffer,
       analysis: src.analysis,
@@ -134,7 +233,7 @@ app.post('/api/batches', async (req, res) => {
 
     const id = randomUUID()
     batches.set(id, { ...batch, sourceId })
-    if (batches.size > 8) batches.delete(batches.keys().next().value)
+    while (batches.size > MAX_BATCHES) batches.delete(batches.keys().next().value)
 
     res.json({ id, ...publicBatch(batch) })
   } catch (err) {
@@ -239,7 +338,13 @@ function publicBatch(batch) {
 }
 
 const port = process.env.PORT ?? 3000
-app.listen(port, () => {
-  console.log(`Creative Expansion — http://localhost:${port}`)
-  console.log(`  format catalog ${catalog.catalogVersion} · ${placements.filter((p) => p.media.includes('image')).length} image placements`)
+// 0.0.0.0 explicitly: platform health checks reach the container from outside,
+// and a loopback-only bind fails them with no useful error.
+app.listen(port, '0.0.0.0', () => {
+  const imageCount = placements.filter((p) => p.media.includes('image')).length
+  console.log(`Creative Expansion listening on :${port}`)
+  console.log(`  format catalog ${catalog.catalogVersion} · ${imageCount} image placements`)
+  console.log(`  limits: ${MAX_UPLOAD_MB} MB upload · ${MAX_SOURCES} sources · ${MAX_BATCHES} batches · ${MAX_PLACEMENTS_PER_BATCH} placements/batch`)
+  console.log(`  access: ${ACCESS_PASSWORD ? 'password required' : 'OPEN — set ACCESS_PASSWORD if this is public'}`)
+  console.log(`  samples: ${listSamples().length} bundled`)
 })

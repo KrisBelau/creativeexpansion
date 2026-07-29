@@ -20,6 +20,11 @@ npm run sample          # synthesise three test masters into samples/
 npm start               # http://localhost:3000
 ```
 
+Or deploy it — the repo has a Render blueprint, and a hosted instance can load the bundled
+sample masters with one click so you don't need files to hand. See
+[`docs/DEPLOY.md`](docs/DEPLOY.md); copy `.env.example` to `.env` and use `npm run dev` for
+local config.
+
 Or headless:
 
 ```bash

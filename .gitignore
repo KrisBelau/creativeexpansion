@@ -3,3 +3,5 @@ out/
 samples/
 uploads/
 *.zip
+.env
+.env.local

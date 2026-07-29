@@ -36,6 +36,7 @@ async function init() {
   renderPlatformList()
   renderFilters()
   wireUpload()
+  await renderSampleLinks()
 
   $('resetBtn').onclick = () => location.reload()
   $('runBtn').onclick = run
@@ -86,10 +87,28 @@ function wireUpload() {
   })
 }
 
-async function upload(file) {
+/**
+ * A hosted instance has no local files to hand, so the bundled test masters are
+ * the fastest way to see what the tool actually does.
+ */
+async function renderSampleLinks() {
+  const { samples } = await (await fetch('/api/samples')).json()
+  if (!samples.length) return
+  $('sampleLine').innerHTML =
+    'or try a sample: ' +
+    samples
+      .map((s) => `<button class="link sample" data-file="${escapeHtml(s.file)}">${escapeHtml(s.label)}</button>`)
+      .join(' · ')
+  for (const btn of $('sampleLine').querySelectorAll('.sample')) {
+    btn.onclick = () => upload(null, btn.dataset.file)
+  }
+}
+
+async function upload(file, sampleName = null) {
   toast('<span class="spinner"></span>Analysing master…', 0)
   const body = new FormData()
-  body.append('source', file)
+  if (file) body.append('source', file)
+  if (sampleName) body.append('sample', sampleName)
   if (state.logoFile) body.append('logo', state.logoFile)
 
   try {

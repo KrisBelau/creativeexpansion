@@ -1,0 +1,39 @@
+# Render blueprint. Point Render at this repo and it reads this file.
+# See docs/DEPLOY.md for the walkthrough and the instance-size trade-offs.
+services:
+  - type: web
+    name: creative-expansion
+    runtime: node
+    # `free` spins down after ~15 minutes idle (first request then takes ~30s to
+    # wake) and caps at 512 MB. Fine for showing the tool to someone; move to
+    # `starter` to stop the spin-down, `standard` for 2 GB if you fan out large
+    # masters across many placements at once.
+    plan: free
+    region: oregon
+    branch: claude/ad-asset-resizer-spec-3jgp4g
+    # `npm run sample` generates the bundled test masters so a hosted instance
+    # can demonstrate itself with no local files. samples/ is gitignored because
+    # it is generated, not authored.
+    buildCommand: npm ci && npm run sample
+    startCommand: npm start
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # A public URL that accepts arbitrary uploads and runs image analysis on
+      # them is an easy way for someone else to burn your CPU quota. Render
+      # generates a random password; read it from the dashboard, then sign in
+      # with any username.
+      - key: ACCESS_PASSWORD
+        generateValue: true
+      # Memory ceilings. Sources, rendered buffers and batches are all held in
+      # process memory, so these are what keep a 512 MB instance alive.
+      - key: MAX_UPLOAD_MB
+        value: "24"
+      - key: MAX_SOURCES
+        value: "4"
+      - key: MAX_BATCHES
+        value: "3"
+      - key: MAX_PLACEMENTS_PER_BATCH
+        value: "60"
