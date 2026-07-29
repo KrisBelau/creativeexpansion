@@ -204,6 +204,12 @@ kbd {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
+.opt { display: flex; gap: 8px; align-items: flex-start; font-size: 12px; margin: 12px 0; cursor: pointer; }
+.opt input { margin: 2px 0 0; accent-color: var(--accent); flex: 0 0 auto; }
+.opt em { display: block; font-style: normal; font-size: 11px; color: var(--ink-3); line-height: 1.45; margin-top: 3px; }
+
+.card .track { font-size: 9px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .05em; margin-top: 2px; }
+
 .naming { display: flex; flex-direction: column; gap: 7px; margin: 14px 0; }
 .naming label { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--ink-3); }
 .naming input {

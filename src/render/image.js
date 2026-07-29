@@ -12,6 +12,7 @@
  */
 import sharp from 'sharp'
 import { rect, roundRect, right, bottom } from '../solver/geometry.js'
+import { composeRelayout } from './relayout.js'
 
 /** Encodings that can carry an alpha channel. JPEG cannot. */
 const ALPHA_CAPABLE = new Set(['png', 'webp'])
@@ -35,9 +36,20 @@ export async function renderImage({
   // encode to solid black in JPEG — a transparent top band in a Figma or
   // Illustrator export comes out looking like the image was cropped away.
   const flatten = ALPHA_CAPABLE.has(format) ? null : flattenColour
+  let relayoutNotes = []
 
   let pipeline
-  if (transform.kind === 'crop') {
+  if (transform.kind === 'relayout') {
+    const composed = await composeRelayout({
+      input,
+      placement,
+      layout: transform.layout,
+      background: transform.analysis?.background,
+      flattenColour: flatten,
+    })
+    pipeline = composed.pipeline
+    relayoutNotes = composed.notes
+  } else if (transform.kind === 'crop') {
     const crop = roundRect(transform.crop)
     pipeline = sourcePipeline(input, flatten)
       .extract({ left: Math.max(0, crop.x), top: Math.max(0, crop.y), width: crop.w, height: crop.h })
@@ -55,7 +67,15 @@ export async function renderImage({
   pipeline = applySharpening(pipeline, scaleFactor)
   pipeline = pipeline.toColourspace('srgb').withMetadata({ icc: 'srgb' })
 
-  return encodeToCeiling({ pipeline, placement, format, byteCeiling, targetRatio, flattenColour })
+  const encoded = await encodeToCeiling({
+    pipeline,
+    placement,
+    format,
+    byteCeiling,
+    targetRatio,
+    flattenColour,
+  })
+  return { ...encoded, notes: [...relayoutNotes, ...(encoded.notes ?? [])] }
 }
 
 /**
@@ -313,7 +333,8 @@ function pickFormat(encoding, allowed, placement) {
 }
 
 function scaleOf(transform, canvas) {
-  return transform.kind === 'crop' ? canvas.w / transform.crop.w : transform.scale
+  if (transform.kind === 'crop') return canvas.w / transform.crop.w
+  return transform.scale
 }
 
 const kb = (n) => `${Math.round(n / 1024)} KB`

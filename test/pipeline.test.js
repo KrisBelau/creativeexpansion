@@ -1,6 +1,7 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import sharp from 'sharp'
+import { readFileSync } from 'node:fs'
 
 import { placements, presets, getPlacement, roleFloor, legibility, resolvePlacements } from '../src/registry.js'
 import { contains, coverage, mapRect, safeArea, fitContain, rect } from '../src/solver/geometry.js'
@@ -9,6 +10,7 @@ import { validateSet, stateOf } from '../src/validate/rules.js'
 import { buildManifest, buildArchive, BlockedExportError } from '../src/export.js'
 import { runBatch } from '../src/pipeline.js'
 import { analyse } from '../src/analysis/index.js'
+import { canRelayout, planLayout } from '../src/solver/layout.js'
 
 /* --------------------------------------------------------------- registry */
 
@@ -351,6 +353,108 @@ describe('input handling', () => {
         'a heavy crop must report what it discarded'
       )
     }
+  })
+})
+
+/* --------------------------------------------------------------- re-layout */
+
+describe('element re-layout', () => {
+  /** Separable master: flat ground, nothing overlapping. */
+  async function separable() {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080">
+      <rect width="1080" height="1080" fill="#f4f1ea"/>
+      <text x="80" y="300" font-family="DejaVu Sans" font-size="110" font-weight="bold" fill="#0d1b2a">Built to</text>
+      <text x="80" y="420" font-family="DejaVu Sans" font-size="110" font-weight="bold" fill="#0d1b2a">last.</text>
+      <rect x="740" y="520" width="180" height="300" rx="24" fill="#0d1b2a"/>
+      <g><rect x="80" y="900" width="300" height="80" rx="40" fill="#e2703a"/>
+      <text x="230" y="952" font-family="DejaVu Sans" font-size="34" font-weight="bold" fill="#fff" text-anchor="middle">Shop now</text></g>
+    </svg>`
+    return sharp(Buffer.from(svg)).png().toBuffer()
+  }
+
+  test('a flat separable master is eligible and re-lays-out rather than letterboxing', async () => {
+    const input = await separable()
+    const analysis = await analyse(input)
+    assert.equal(canRelayout(analysis).eligible, true, JSON.stringify(canRelayout(analysis)))
+
+    const batch = await runBatch({ input, analysis, recipe: { placements: ['meta_stories'] } })
+    const [out] = batch.outputs
+    assert.equal(out.transform.kind, 'relayout')
+    // The point of the track: elements keep their size instead of being shrunk
+    // to fit a taller frame.
+    assert.ok(out.transform.scale > 0.9, `scale was ${out.transform.scale}`)
+  })
+
+  test('overlapping elements disqualify re-layout instead of producing fragments', async () => {
+    // Type running across the product cannot be lifted as separate rectangles —
+    // one sprite would carry a slice of the other.
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080">
+      <rect width="1080" height="1080" fill="#f4f1ea"/>
+      <rect x="500" y="300" width="300" height="400" rx="20" fill="#0d1b2a"/>
+      <text x="80" y="520" font-family="DejaVu Sans" font-size="80" font-weight="bold" fill="#0d1b2a">Across the product</text>
+    </svg>`
+    const analysis = await analyse(await sharp(Buffer.from(svg)).png().toBuffer())
+    const verdict = canRelayout(analysis)
+    assert.equal(verdict.eligible, false)
+    assert.match(verdict.reason, /overlap/)
+  })
+
+  test('a photographic ground disqualifies re-layout', async () => {
+    // Lifting an element off a photo leaves a hole that cannot be filled without
+    // inventing detail, so the honest fallback is fit-with-extension.
+    const analysis = await analyse(readFileSync('samples/master-photo-16x9.png'))
+    assert.equal(canRelayout(analysis).eligible, false)
+  })
+
+  test('re-layout never scales elements non-uniformly', async () => {
+    const input = await separable()
+    const analysis = await analyse(input)
+    const batch = await runBatch({ input, analysis, recipe: { placements: ['meta_stories'] } })
+    const [out] = batch.outputs
+    const source = new Map(analysis.regions.map((r) => [r.id, r.liftBox ?? r.box]))
+    for (const el of out.transform.elements) {
+      const src = source.get(el.regionId)
+      if (!src) continue
+      const kx = el.dst.w / src.w
+      const ky = el.dst.h / src.h
+      assert.ok(Math.abs(kx - ky) < 0.02, `${el.regionId} scaled ${kx.toFixed(3)} x ${ky.toFixed(3)}`)
+    }
+  })
+
+  test('the legal line is only droppable when the recipe allows it', async () => {
+    const input = await separable()
+    const analysis = await analyse(input)
+    // Inject a wide legal line that cannot meet its floor on a small banner.
+    const withLegal = {
+      ...analysis,
+      regions: [
+        ...analysis.regions,
+        {
+          id: 'legal_line',
+          type: 'text',
+          role: 'legal',
+          box: { x: 80, y: 1030, w: 900, h: 22 },
+          liftBox: { x: 76, y: 1026, w: 908, h: 30 },
+          capHeight: 16,
+          protection: 'immutable',
+          source: 'auto',
+          confidence: 0.8,
+          sourceContrast: 8,
+        },
+      ],
+    }
+
+    const strict = planLayout({ analysis: withLegal, placement: getPlacement('gdn_300x250') })
+    const permissive = planLayout({
+      analysis: withLegal,
+      placement: getPlacement('gdn_300x250'),
+      allowDropLegal: true,
+    })
+    assert.equal(strict.feasible, false, 'legal must not be dropped by default')
+    assert.ok(
+      !permissive.feasible || permissive.dropped.includes('legal'),
+      'with the opt-in, legal becomes droppable'
+    )
   })
 })
 

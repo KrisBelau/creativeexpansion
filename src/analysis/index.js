@@ -48,14 +48,29 @@ export async function analyse(input, { brandKit = null, logoReference = null } =
   // given it by the resize, and the two cases deserve different severities.
   for (const r of textRegions) r.sourceContrast = measureContrast(textProxy, r.box)
 
+  // What to lift if this element is ever moved. A detection box is tight to the
+  // ink, but the *element* is bigger: a CTA label sits on a pill, and lifting the
+  // label alone would strand white type on the page colour. Anti-aliased edges
+  // need a margin too.
+  for (const r of textRegions) r.liftBox = liftBoxFor(textProxy, r)
+
   const source = salProxy.source
   const regions = [...textRegions]
-  if (logoRegion) regions.push(logoRegion)
+  if (logoRegion) {
+    logoRegion.liftBox = padBox(logoRegion.box, source, 0.55)
+    regions.push(logoRegion)
+  }
 
   // The subject region is the saliency mass that is not type: what a crop should
   // try hardest to keep whole when there is no explicit product mask.
   const subject = deriveSubject(saliency, salProxy, textRegions)
-  if (subject) regions.push(subject)
+  if (subject) {
+    // Saliency finds the high-contrast core of a product, not its full silhouette:
+    // a pale cap or a soft shadow falls outside. Pad generously, because a product
+    // lifted with its top sliced off is worse than one lifted with spare ground.
+    subject.liftBox = padBox(subject.box, source, 0.14, { basis: 'short', max: 90 })
+    regions.push(subject)
+  }
 
   return {
     engineVersion: ENGINE_VERSION,
@@ -71,6 +86,97 @@ export async function analyse(input, { brandKit = null, logoReference = null } =
     orientation: salProxy.orientation,
     quality: await qualityGate(input, salProxy, textRegions, background),
   }
+}
+
+/**
+ * Grow a box, clamped to the frame. `pad` is derived from the box height rather
+ * than its shorter side: a legal line is 862x23, so a fraction of the short side
+ * is a couple of pixels and clips the final full stop, while a fraction of the
+ * long side would be 70px and blow past the usable width. Height tracks the type
+ * size, which is what the overhang actually scales with.
+ */
+function padBox(box, source, fraction, { basis = 'height', min = 4, max = 28 } = {}) {
+  const reference = basis === 'height' ? box.h : Math.min(box.w, box.h)
+  const pad = Math.min(max, Math.max(min, Math.round(reference * fraction)))
+  const x = Math.max(0, box.x - pad)
+  const y = Math.max(0, box.y - pad)
+  return rect(
+    x,
+    y,
+    Math.min(source.w - x, box.w + pad * 2),
+    Math.min(source.h - y, box.h + pad * 2)
+  )
+}
+
+/**
+ * The rect to lift for a text element. Type sitting on a solid plate (a button)
+ * is grown outward until the surrounding colour stops matching that plate, so the
+ * whole component travels together. Everything else just gets a small margin for
+ * anti-aliased edges.
+ */
+function liftBoxFor(proxy, region) {
+  const small = padBox(region.box, proxy.source, 0.55)
+  if (!region.onPlate) return small
+
+  const b = proxy.toProxy(region.box)
+  const plate = ringMedian(proxy, b, Math.max(2, Math.round(b.h * 0.15)))
+  if (!plate) return small
+
+  const step = Math.max(2, Math.round(b.h * 0.12))
+  const limit = b.h * 2.5
+  let grown = { ...b }
+
+  for (let i = 0; i < 40; i++) {
+    const next = {
+      x: grown.x - step,
+      y: grown.y - step,
+      w: grown.w + step * 2,
+      h: grown.h + step * 2,
+    }
+    if (next.w > b.w + limit * 2 || next.h > b.h + limit) break
+    const ring = ringMedian(proxy, next, step)
+    if (!ring) break
+    const drift = Math.hypot(ring[0] - plate[0], ring[1] - plate[1], ring[2] - plate[2])
+    // Once the surround stops looking like the plate, we have reached its edge.
+    if (drift > 34) break
+    grown = next
+  }
+
+  // Include the plate's own boundary, then convert back to source pixels.
+  const out = proxy.toSource({
+    x: grown.x - step / 2,
+    y: grown.y - step / 2,
+    w: grown.w + step,
+    h: grown.h + step,
+  })
+  const x = Math.max(0, out.x)
+  const y = Math.max(0, out.y)
+  return rect(x, y, Math.min(proxy.source.w - x, out.w), Math.min(proxy.source.h - y, out.h))
+}
+
+/** Median colour of a band of width `pad` immediately outside `box`. */
+function ringMedian(proxy, box, pad) {
+  const { w, h } = proxy.proxy
+  const x0 = Math.max(0, Math.floor(box.x - pad))
+  const y0 = Math.max(0, Math.floor(box.y - pad))
+  const x1 = Math.min(w, Math.ceil(box.x + box.w + pad))
+  const y1 = Math.min(h, Math.ceil(box.y + box.h + pad))
+  const channels = [[], [], []]
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const inside = x >= box.x && x < box.x + box.w && y >= box.y && y < box.y + box.h
+      if (inside) continue
+      const i = (y * w + x) * 3
+      channels[0].push(proxy.rgb[i])
+      channels[1].push(proxy.rgb[i + 1])
+      channels[2].push(proxy.rgb[i + 2])
+    }
+  }
+  if (channels[0].length < 8) return null
+  return channels.map((c) => {
+    c.sort((a, b) => a - b)
+    return c[Math.floor(c.length / 2)]
+  })
 }
 
 /**
@@ -129,25 +235,16 @@ function deriveSubject(saliency, proxy, textRegions) {
   const cut = sorted[Math.floor(sorted.length * 0.95)]
   if (!(cut > 0.05)) return null
 
-  let minX = w
-  let minY = h
-  let maxX = -1
-  let maxY = -1
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      if (masked.data[y * w + x] < cut) continue
-      if (x < minX) minX = x
-      if (x > maxX) maxX = x
-      if (y < minY) minY = y
-      if (y > maxY) maxY = y
-    }
-  }
-  if (maxX < 0) return null
+  // The bounding box of *all* salient pixels is not a subject — on a typical ad it
+  // stretches from the logo to the product and swallows the copy in between, which
+  // makes it useless as a crop constraint and actively wrong as a movable element
+  // (re-layout would lift the headline twice). Take the largest connected blob
+  // instead: that is the thing being shown.
+  const blob = largestBlob(masked, cut)
+  if (!blob) return null
 
-  const proxyBox = rect(minX, minY, maxX - minX + 1, maxY - minY + 1)
-  // A "subject" covering most of the frame carries no information and would only
-  // over-constrain the crop solver. Better to have no subject than a useless one.
-  if (area(proxyBox) > w * h * 0.62) return null
+  // Still refuse a subject that covers most of the frame; it carries no signal.
+  if (area(blob) > w * h * 0.55) return null
 
   return {
     id: 'subject',
@@ -155,8 +252,60 @@ function deriveSubject(saliency, proxy, textRegions) {
     protection: 'protected',
     source: 'auto',
     confidence: 0.5,
-    box: proxy.toSource(proxyBox),
+    box: proxy.toSource(blob),
   }
+}
+
+/** Bounding box of the largest 8-connected region above `cut`. */
+function largestBlob(grid, cut) {
+  const { w, h, data } = grid
+  const seen = new Uint8Array(w * h)
+  const stack = new Int32Array(w * h)
+  let best = null
+  let bestCount = 0
+
+  for (let start = 0; start < data.length; start++) {
+    if (seen[start] || data[start] < cut) continue
+    let sp = 0
+    stack[sp++] = start
+    seen[start] = 1
+    let minX = w
+    let minY = h
+    let maxX = -1
+    let maxY = -1
+    let count = 0
+
+    while (sp > 0) {
+      const i = stack[--sp]
+      const x = i % w
+      const y = (i - x) / w
+      count++
+      if (x < minX) minX = x
+      if (x > maxX) maxX = x
+      if (y < minY) minY = y
+      if (y > maxY) maxY = y
+      for (let dy = -1; dy <= 1; dy++) {
+        const ny = y + dy
+        if (ny < 0 || ny >= h) continue
+        for (let dx = -1; dx <= 1; dx++) {
+          const nx = x + dx
+          if (nx < 0 || nx >= w) continue
+          const ni = ny * w + nx
+          if (!seen[ni] && data[ni] >= cut) {
+            seen[ni] = 1
+            stack[sp++] = ni
+          }
+        }
+      }
+    }
+
+    if (count > bestCount) {
+      bestCount = count
+      best = rect(minX, minY, maxX - minX + 1, maxY - minY + 1)
+    }
+  }
+
+  return best
 }
 
 /** SPEC 5.2 — findings, not silent adjustments. */

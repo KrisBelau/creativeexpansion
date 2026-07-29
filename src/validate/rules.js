@@ -59,7 +59,8 @@ export async function validateOutput({ buffer, format, placement, analysis, tran
   }
 
   // --- craft ---------------------------------------------------------------
-  const scale = transform.kind === 'crop' ? canvas.w / transform.crop.w : transform.scale
+  const scale =
+    transform.kind === 'crop' ? canvas.w / transform.crop.w : transform.scale
   const craft = legibility.craft
   if (scale > craft.maxUpscaleBlock) {
     findings.push({
@@ -90,7 +91,8 @@ export async function validateOutput({ buffer, format, placement, analysis, tran
   const zone = safeArea(canvas, safeZoneOf(placement))
   for (const region of analysis.regions) {
     if (region.type !== 'logo') continue
-    const mapped = toOutput(region.box, transform, canvas)
+    const mapped = toOutput(region.box, transform, canvas, region.id)
+    if (!mapped) continue // dropped by the re-layout; reported there
     if (!contains({ x: 0, y: 0, w: canvas.w, h: canvas.h }, mapped, 1)) {
       findings.push({
         code: 'logo_clipped',
@@ -128,7 +130,8 @@ export async function validateOutput({ buffer, format, placement, analysis, tran
 
   for (const region of analysis.regions) {
     if (region.protection !== 'protected' || region.type === 'subject') continue
-    const mapped = toOutput(region.box, transform, canvas)
+    const mapped = toOutput(region.box, transform, canvas, region.id)
+    if (!mapped) continue // dropped by the re-layout; reported there
     const kept = coverage({ x: 0, y: 0, w: canvas.w, h: canvas.h }, mapped)
     if (kept < craft.minProductCoverage) {
       findings.push({
@@ -200,7 +203,13 @@ export function validateSet(outputs) {
   return findings
 }
 
-function toOutput(box, transform, canvas) {
+function toOutput(box, transform, canvas, regionId) {
+  if (transform.kind === 'relayout') {
+    const el = transform.layout.elements.find((e) => e.regionId === regionId)
+    // boxDst is the region's own ink; dst includes the surrounding ground that
+    // travels with the element and must not be measured as content.
+    return el ? { ...(el.boxDst ?? el.dst) } : null
+  }
   if (transform.kind === 'crop') return mapRect(box, transform.crop, canvas.w, canvas.h)
   const { placed, scale } = transform
   return { x: placed.x + box.x * scale, y: placed.y + box.y * scale, w: box.w * scale, h: box.h * scale }

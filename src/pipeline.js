@@ -11,6 +11,7 @@ import { createHash } from 'node:crypto'
 import { resolvePlacements, getPlacement, byteCeiling } from './registry.js'
 import { analyse, ENGINE_VERSION } from './analysis/index.js'
 import { solveCrop, solveFit } from './solver/crop.js'
+import { canRelayout, planLayout } from './solver/layout.js'
 import { planExtension, EXTENSION_ORDER } from './solver/extend.js'
 import { checkLegibility, checkContrast } from './solver/legibility.js'
 import { renderImage, makeContrastSampler } from './render/image.js'
@@ -26,6 +27,11 @@ export const DEFAULT_POLICY = {
   // what a designer almost always intends and, more importantly, it is obviously
   // wrong when it isn't — unlike black, which reads as missing image.
   flattenColour: '#ffffff',
+  // Off by default. On small banners the legal line is almost always the binding
+  // constraint — it is wide, it has the lowest floor, and it may not be shrunk —
+  // so allowing it to be dropped unblocks a great many placements. That is a call
+  // for a human with legal sign-off, never a default.
+  allowDropLegal: false,
   onBlocked: 'flag',
 }
 
@@ -91,27 +97,65 @@ async function renderOne({ input, placement, analysis, policy, override, recipe 
   const canvas = placement.canvas
 
   // --- geometry ------------------------------------------------------------
+  // Track order matters. A crop that fits is ideal: it is the master's own
+  // composition, untouched. Re-layout comes next, because moving elements beats
+  // shrinking the whole master onto a colour field. Fit-with-extension is last —
+  // it preserves everything but at a scale that usually kills the type.
+  const forced = override.transform ?? policy.transform ?? 'auto'
+
   const cropResult =
-    override.transform === 'fit'
-      ? { feasible: false, notes: [{ code: 'override_fit', severity: 'info', message: 'Recipe override forced fit-with-extension.' }] }
+    forced === 'fit' || forced === 'relayout'
+      ? { feasible: false, notes: [{ code: 'transform_forced', severity: 'info', message: `Recipe forced the ${forced} track.` }] }
       : solveCrop({ analysis, placement, anchorBias: override.anchorBias ?? policy.anchorBias })
 
   let transform
   let extension = { strategy: 'none', seamScore: 0, notes: [] }
+  let layout = null
 
   if (cropResult.feasible) {
     transform = { kind: 'crop', crop: cropResult.crop }
   } else {
     for (const note of cropResult.notes ?? []) findings.push({ ...note, severity: note.severity ?? 'info' })
-    const fit = solveFit({ analysis, placement, respectSafeZone: hasSafeZone(placement) })
-    transform = { kind: 'fit', placed: fit.placed, scale: fit.scale }
-    extension = planExtension({
-      analysis,
-      placement,
-      pad: fit.padded,
-      allowed: override.extension ?? policy.extension,
-      matteColour: override.matteColour ?? policy.matteColour,
-    })
+
+    const relayoutAllowed = forced !== 'fit' && (override.relayout ?? policy.relayout) !== false
+    const eligible = relayoutAllowed ? canRelayout(analysis) : { eligible: false, reason: 'disabled by recipe' }
+
+    if (eligible.eligible) {
+      layout = planLayout({
+        analysis,
+        placement,
+        allowDropLegal: override.allowDropLegal ?? policy.allowDropLegal,
+      })
+      if (layout.feasible) {
+        transform = { kind: 'relayout', layout, analysis, scale: layout.scale }
+        findings.push(...layout.notes)
+        findings.push({
+          code: 'relayout_applied',
+          severity: 'info',
+          message: `Elements were re-laid-out for this canvas at ${(layout.scale * 100).toFixed(0)}% rather than fitting the whole master onto a background fill.`,
+        })
+      } else {
+        findings.push(...layout.notes)
+      }
+    } else if (relayoutAllowed) {
+      findings.push({
+        code: 'relayout_not_eligible',
+        severity: 'info',
+        message: `Re-layout was not attempted: ${eligible.reason}.`,
+      })
+    }
+
+    if (!transform) {
+      const fit = solveFit({ analysis, placement, respectSafeZone: hasSafeZone(placement) })
+      transform = { kind: 'fit', placed: fit.placed, scale: fit.scale }
+      extension = planExtension({
+        analysis,
+        placement,
+        pad: fit.padded,
+        allowed: override.extension ?? policy.extension,
+        matteColour: override.matteColour ?? policy.matteColour,
+      })
+    }
   }
 
   // --- legibility, measured on the solved geometry -------------------------
@@ -231,6 +275,24 @@ async function renderOne({ input, placement, analysis, policy, override, recipe 
 }
 
 function describeTransform(transform) {
+  if (transform.kind === 'relayout') {
+    return {
+      kind: 'relayout',
+      scale: Math.round(transform.scale * 1000) / 1000,
+      dropped: transform.layout.dropped,
+      elements: transform.layout.elements.map((e) => ({
+        regionId: e.regionId,
+        type: e.type,
+        role: e.role,
+        dst: {
+          x: Math.round(e.dst.x),
+          y: Math.round(e.dst.y),
+          w: Math.round(e.dst.w),
+          h: Math.round(e.dst.h),
+        },
+      })),
+    }
+  }
   if (transform.kind === 'crop') {
     const c = transform.crop
     return {

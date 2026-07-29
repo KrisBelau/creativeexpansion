@@ -90,6 +90,16 @@
           <label>Version <input id="metaVersion" value="v1" /></label>
         </div>
 
+        <label class="opt">
+          <input type="checkbox" id="allowDropLegal" />
+          <span>
+            Allow dropping the legal line
+            <em>On small banners the legal line is usually what makes an output impossible: it is
+            wide, it has the lowest floor, and it may not be shrunk. Only tick this with legal
+            sign-off to move that copy to the landing page.</em>
+          </span>
+        </label>
+
         <button class="primary" id="runBtn" disabled>Render</button>
         <div class="progress" id="runProgress" hidden></div>
         <p class="note" id="runNote"></p>

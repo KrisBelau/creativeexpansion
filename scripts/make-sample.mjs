@@ -29,9 +29,12 @@ const flatMaster = () => `
 <svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1080">
   <rect width="1080" height="1080" fill="${BRAND.light}"/>
 
-  <!-- subject: offset right of centre so a centre-crop would be visibly wrong -->
-  <g transform="translate(660,470)">
-    <ellipse cx="0" cy="150" rx="150" ry="22" fill="#00000018"/>
+  <!-- Subject: offset right of centre so a centre-crop would be visibly wrong,
+       but clear of the copy. Elements that overlap cannot be lifted as separate
+       sprites, so a master whose subhead runs through its product is a master no
+       tool can re-lay-out. -->
+  <g transform="translate(790,430)">
+    <ellipse cx="0" cy="150" rx="140" ry="20" fill="#00000018"/>
     <rect x="-78" y="-190" width="156" height="330" rx="26" fill="${BRAND.ink}"/>
     <rect x="-78" y="-190" width="156" height="120" rx="26" fill="${BRAND.accent}"/>
     <rect x="-40" y="-230" width="80" height="48" rx="10" fill="#8a9aa8"/>
@@ -43,7 +46,7 @@ const flatMaster = () => `
     <text x="90" y="330" font-size="96" font-weight="bold">Built for</text>
     <text x="90" y="430" font-size="96" font-weight="bold">the long</text>
     <text x="90" y="530" font-size="96" font-weight="bold">haul.</text>
-    <text x="90" y="610" font-size="44" fill="#44586a">Ten-year guarantee on every unit.</text>
+    <text x="90" y="620" font-size="44" fill="#44586a">Ten-year guarantee.</text>
   </g>
 
   <g transform="translate(90,880)">

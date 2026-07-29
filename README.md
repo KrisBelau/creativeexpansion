@@ -42,8 +42,16 @@ archive.
 1. **Analyses** the master — saliency, text regions grouped into typographic blocks with roles
    (headline / subhead / body / CTA / price / legal), logo location against a brand-kit
    reference, per-edge background statistics, palette, and a source quality gate.
-2. **Solves** geometry per placement — a protected crop that may not cut through type, a logo,
-   or a product; or, when no such crop exists, a fit with the background extended.
+2. **Solves** geometry per placement, preferring the track that damages the composition least:
+   - **Protected crop** — the master's own composition, untouched. Never cuts through type, a
+     logo or a product.
+   - **Element re-layout** — when no crop fits, each detected element is lifted as its own sprite
+     and re-placed for the new canvas at a scale that clears the legibility floors. This is what
+     stops most aspect changes becoming a shrunken master on a colour field. Requires a flat or
+     near-flat ground (a lifted element leaves a hole that has to be filled honestly) and
+     elements that do not overlap (rectangular sprites cannot separate overlapping ones).
+   - **Fit with background extension** — last resort. Preserves everything, at a scale that often
+     kills the type; usually ends up blocked, correctly.
 3. **Measures** legibility against the floors for that placement's viewing context, and contrast
    against the pixels actually rendered.
 4. **Blocks** anything that fails, with a plain-language reason and a suggested fix.
@@ -100,9 +108,10 @@ These are honest gaps, not oversights — see SPEC §17 for the open questions b
 
 - **No face detection.** Photographic sources carry a warning telling you to check crops
   manually. Saliency stands in, which is not the same thing.
-- **No OCR.** Text regions are located, not read, so the de-flattening track (SPEC §6.3) that
-  re-typesets copy at the correct size is not built. That is the single biggest quality lever
-  still on the table: without it, a flat master's type can only be scaled, never re-set.
+- **No OCR, so type is moved but never re-set.** Re-layout lifts an element's real pixels and
+  re-places them, which needs no text recognition — but it cannot re-flow a line to a new
+  measure. A wide legal line stays wide, and that is what blocks most small banners. Reading the
+  words is what would fix it, and it is the single biggest quality lever still on the table.
 - **Text detection is heuristic** and misses outline and script faces while occasionally
   finding type in busy photography. So the region list lets you retype or remove anything it got
   wrong, with one click to restore the detected set, and low-confidence regions warn rather than

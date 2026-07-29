@@ -31,8 +31,11 @@ export function checkLegibility({ analysis, placement, transform }) {
   const scale = scaleOf(transform, canvas)
 
   for (const region of textRegions) {
-    const outBox = toOutput(region.box, transform, canvas)
-    const renderedCap = region.capHeight * scale
+    const outBox = toOutput(region.box, transform, canvas, region.id)
+    // An element the re-layout dropped is not in the output, so there is nothing
+    // to measure — the drop itself is already reported as a finding.
+    if (!outBox) continue
+    const renderedCap = region.capHeight * scaleFor(transform, scale, region.id)
     const floor = roleFloor(placement, region.role)
 
     const m = {
@@ -142,8 +145,10 @@ export function checkLegibility({ analysis, placement, transform }) {
   // --- set-level checks ----------------------------------------------------
   if (textRegions.length) {
     const coverageRatio =
-      textRegions.reduce((a, r) => a + area(toOutput(r.box, transform, canvas)), 0) /
-      (canvas.w * canvas.h)
+      textRegions.reduce((a, r) => {
+        const b = toOutput(r.box, transform, canvas, r.id)
+        return a + (b ? area(b) : 0)
+      }, 0) / (canvas.w * canvas.h)
     if (coverageRatio > legibility.composition.maxTextCoveragePct / 100) {
       findings.push({
         code: 'text_coverage_high',
@@ -246,7 +251,14 @@ export function checkContrast({ placement, measurements, sampler, skipRegions = 
 
 /* ------------------------------------------------------------------ helpers */
 
-function toOutput(box, transform, canvas) {
+function toOutput(box, transform, canvas, regionId) {
+  if (transform.kind === 'relayout') {
+    // Each element has its own destination; there is no single global mapping.
+    const el = transform.layout.elements.find((e) => e.regionId === regionId)
+    // boxDst is the region's own ink; dst includes the surrounding ground that
+    // travels with the element and must not be measured as content.
+    return el ? { ...(el.boxDst ?? el.dst) } : null
+  }
   if (transform.kind === 'crop') return mapRect(box, transform.crop, canvas.w, canvas.h)
   const { placed, scale } = transform
   return {
@@ -258,7 +270,8 @@ function toOutput(box, transform, canvas) {
 }
 
 function scaleOf(transform, canvas) {
-  return transform.kind === 'crop' ? canvas.w / transform.crop.w : transform.scale
+  if (transform.kind === 'crop') return canvas.w / transform.crop.w
+  return transform.scale
 }
 
 function softZone(canvas, safeZone) {
@@ -284,7 +297,17 @@ export function edgePadFloor(canvas) {
  * either way, but a reviewer can only act on it if they know whether the driver
  * was the target's aspect ratio or its UI safe zone.
  */
+/** Uniform for crop and fit; per-element for re-layout (though currently equal). */
+function scaleFor(transform, globalScale, regionId) {
+  if (transform.kind !== 'relayout') return globalScale
+  const el = transform.layout.elements.find((e) => e.regionId === regionId)
+  return el && el.src.h > 0 ? el.dst.h / el.src.h : globalScale
+}
+
 function cause(transform, placement) {
+  if (transform.kind === 'relayout') {
+    return ` Elements were re-laid-out at ${(transform.scale * 100).toFixed(0)}% and this one still falls short.`
+  }
   if (transform.kind === 'crop') return ''
   const s = placement.safeZone ?? {}
   const inset = (s.top ?? 0) + (s.bottom ?? 0) + (s.left ?? 0) + (s.right ?? 0)

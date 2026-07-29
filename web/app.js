@@ -565,6 +565,7 @@ async function run() {
           concept: $('metaConcept').value,
           version: $('metaVersion').value,
         },
+        policy: { allowDropLegal: $('allowDropLegal').checked },
       }),
     })
     const started = await res.json()
@@ -688,6 +689,7 @@ function renderGrid() {
         <div class="thumb">${src}</div>
         <div class="meta">
           <div class="pl"><span class="badge ${o.state}">${o.state}</span>${escapeHtml(o.placementName)}</div>
+          <div class="track">${o.transform.kind === 'relayout' ? 're-laid out' : o.transform.kind === 'crop' ? 'cropped' : 'fitted'}</div>
           <div class="dims">
             <span>${o.width}×${o.height}</span>
             <span>${o.bytes ? Math.round(o.bytes / 1024) + 'KB' : '—'}${blockedCount ? ` · ${blockedCount}✗` : warnCount ? ` · ${warnCount}!` : ''}</span>
@@ -711,7 +713,7 @@ function openDrawer(placementId) {
 
   $('dTitle').textContent = `${o.platformName} — ${o.placementName}`
   $('dSub').textContent =
-    `${o.width}×${o.height} · ${o.aspect} · ${o.context} · ${o.transform.kind === 'crop' ? 'cropped' : `fitted + ${o.extension.strategy}`}`
+    `${o.width}×${o.height} · ${o.aspect} · ${o.context} · ${describeStrategy(o)}`
 
   $('dFacts').innerHTML = facts(o)
     .map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`)
@@ -791,8 +793,14 @@ function facts(o) {
     ['File', o.filename ? `<span title="${escapeHtml(o.filename)}">${escapeHtml(truncate(o.filename, 42))}</span>` : '—'],
     ['Encoding', o.format ? `${o.format}${o.quality ? ` q${o.quality}` : ''}` : '—'],
     ['Size', o.bytes ? `${Math.round(o.bytes / 1024)} KB / ${Math.round(o.byteCeiling / 1024)} KB ceiling` : '—'],
-    ['Strategy', o.transform.kind === 'crop' ? 'protected crop' : `fit + ${o.extension.strategy} extension`],
+    ['Strategy', describeStrategy(o)],
   ]
+  if (o.transform.kind === 'relayout') {
+    rows.push(['Elements', `${o.transform.elements.filter((e) => !e.carriedBy).length} re-placed`])
+    rows.push(['Scale', `${Math.round(o.transform.scale * 100)}%`])
+    if (o.transform.dropped?.length) rows.push(['Dropped', o.transform.dropped.join(', ')])
+    return rows
+  }
   if (o.transform.kind === 'crop') {
     const c = o.transform.crop
     rows.push(['Crop', `${c.w}×${c.h} at ${c.x},${c.y}`])
@@ -802,6 +810,12 @@ function facts(o) {
     rows.push(['Seam score', `${o.extension.seamScore}`])
   }
   return rows
+}
+
+function describeStrategy(o) {
+  if (o.transform.kind === 'relayout') return 'element re-layout'
+  if (o.transform.kind === 'crop') return 'protected crop'
+  return `fit + ${o.extension.strategy} extension`
 }
 
 function measureTable(o) {

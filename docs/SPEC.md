@@ -7,8 +7,13 @@
 > are worth promoting into this spec: (a) *blocked* means an output is defective as produced,
 > while a defect inherited from the master warns and is reported once against the source
 > (§11 now reflects this); and (b) whole-canvas extension strategies must be judged against the
-> largest pad, never per-edge (§6.4). Face detection, OCR and therefore the whole de-flattening
-> track (§6.3) remain unbuilt.
+> largest pad, never per-edge (§6.4).
+>
+> §6.3 is now partly built. Element re-layout lifts each detected element's real pixels and
+> re-places them for the target canvas, which needs no OCR — but without the words it cannot
+> re-flow a line to a new measure, so wide copy stays wide. It is gated on a reconstructable
+> ground and on elements being separable as rectangles; where either fails, the output falls back
+> to fit-with-extension and says why. Face detection and OCR remain unbuilt.
 
 A web utility that takes finished image and video ad creative and expands it into every
 format a media plan needs — without the output looking resized.
