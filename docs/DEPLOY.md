@@ -66,6 +66,11 @@ build-time sample generation.
 **The free tier's spin-down looks like a hang.** The first request after idle takes ~30 s while
 the container wakes. It is not a bug in the app.
 
+**Rendering is slow on shared CPU.** A 39-placement fan-out takes ~30 s on a dedicated core and
+several minutes on a free instance. The render is a background job with a progress bar, so the
+page stays responsive and tells you where it is — but if you select the widest presets on the
+free tier, expect to wait. Fewer placements per batch, or a Standard instance, is the fix.
+
 **Video is not supported.** Phase 3 needs `ffmpeg`, which Render's Node runtime does not
 include. Video placements are filtered out of every preset, so nothing breaks — there is just
 nothing to render. Adding it later means either a Docker runtime with ffmpeg installed or

@@ -399,9 +399,16 @@ function updateSelectionCount() {
 
 /* ------------------------------------------------------------------- render */
 
+/**
+ * Rendering is a job. The POST returns an id immediately and we poll for
+ * progress — a 40-placement fan-out takes tens of seconds on good hardware and
+ * minutes on a shared-CPU instance, and a page that shows nothing for that long
+ * is indistinguishable from a frozen one.
+ */
 async function run() {
   $('runBtn').disabled = true
   $('runBtn').innerHTML = '<span class="spinner"></span>Rendering…'
+  showProgress({ done: 0, total: 0 })
 
   try {
     const res = await fetch('/api/batches', {
@@ -418,8 +425,10 @@ async function run() {
         },
       }),
     })
-    const data = await res.json()
-    if (!res.ok) throw new Error(data.error ?? 'Render failed')
+    const started = await res.json()
+    if (!res.ok) throw new Error(started.error ?? 'Render failed')
+
+    const data = await pollBatch(started.id)
 
     state.batch = data
     state.regionsDirty = false
@@ -428,11 +437,49 @@ async function run() {
     renderReview()
     $('panelReview').scrollIntoView({ behavior: 'smooth', block: 'start' })
   } catch (err) {
-    toast(err.message, 5000, true)
+    toast(err.message, 6000, true)
   } finally {
+    hideProgress()
     $('runBtn').disabled = false
     $('runBtn').textContent = state.batch ? 'Re-render' : 'Render'
   }
+}
+
+async function pollBatch(id) {
+  const deadline = Date.now() + 15 * 60 * 1000
+  let delay = 400
+  while (Date.now() < deadline) {
+    const res = await fetch(`/api/batches/${id}`)
+    const data = await res.json()
+    if (data.state === 'running') {
+      showProgress(data.progress, data.elapsedMs)
+      await new Promise((r) => setTimeout(r, delay))
+      // Back off gently on long jobs so a slow instance is not also being polled hard.
+      delay = Math.min(1500, delay * 1.15)
+      continue
+    }
+    if (!res.ok || data.state === 'error') throw new Error(data.error ?? 'Render failed')
+    return data
+  }
+  throw new Error('Render is taking unusually long. Check the server logs.')
+}
+
+function showProgress(progress, elapsedMs = 0) {
+  const el = $('runProgress')
+  el.hidden = false
+  const { done = 0, total = 0, placementId } = progress ?? {}
+  const pct = total ? Math.round((done / total) * 100) : 0
+  const secs = Math.round(elapsedMs / 1000)
+  el.innerHTML = `
+    <div class="bar"><i style="width:${pct}%"></i></div>
+    <div class="bar-label">
+      <span>${total ? `${done} / ${total}` : 'starting…'}${placementId ? ` · ${escapeHtml(placementId)}` : ''}</span>
+      <span>${secs ? `${secs}s` : ''}</span>
+    </div>`
+}
+
+function hideProgress() {
+  $('runProgress').hidden = true
 }
 
 /* ------------------------------------------------------------------- review */
@@ -487,9 +534,12 @@ function renderGrid() {
 
   $('grid').innerHTML = outputs
     .map((o) => {
+      // Tiles are 116px tall. Asking for the full-resolution asset here means a
+      // 40-placement batch decodes tens of megabytes of RGBA in the tab, which
+      // janks or hangs the browser.
       const src = o.state === 'blocked' && !o.format
         ? ''
-        : `<img src="/api/batches/${state.batch.id}/outputs/${o.placementId}" alt="" loading="lazy" />`
+        : `<img src="/api/batches/${state.batch.id}/outputs/${o.placementId}?w=320" alt="" loading="lazy" />`
       const blockedCount = o.findings.filter((f) => f.severity === 'blocked').length
       const warnCount = o.findings.filter((f) => f.severity === 'warn').length
       return `<div class="card ${o.state}" data-id="${o.placementId}">

@@ -9,6 +9,7 @@
  */
 import express from 'express'
 import multer from 'multer'
+import sharp from 'sharp'
 import { randomUUID, timingSafeEqual } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, basename, extname } from 'node:path'
@@ -16,7 +17,7 @@ import { readdirSync, readFileSync, existsSync } from 'node:fs'
 
 import { catalog, presets, placements, legibility, resolvePlacements } from './registry.js'
 import { analyse } from './analysis/index.js'
-import { runBatch, summarise } from './pipeline.js'
+import { runBatch } from './pipeline.js'
 import { buildArchive, buildManifest, BlockedExportError } from './export.js'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -282,67 +283,149 @@ function pruneStaleFindings(src) {
 
 /* ------------------------------------------------------------------ render */
 
-app.post('/api/batches', async (req, res) => {
+/**
+ * Rendering is a job, not a request. A 39-placement fan-out takes ~30s on decent
+ * hardware and several minutes on a shared-CPU instance; holding an HTTP request
+ * open for that gives the client no progress, risks a proxy timeout, and looks
+ * exactly like the app has frozen. So: accept the work, return an id, report
+ * progress on poll.
+ */
+app.post('/api/batches', (req, res) => {
+  const { sourceId, presets: presetIds = [], placements: placementIds = [], meta = {}, policy = {} } = req.body ?? {}
+  const src = sources.get(sourceId)
+  if (!src) return res.status(404).json({ error: 'Unknown source. Re-upload it.' })
+  if (!presetIds.length && !placementIds.length) {
+    return res.status(400).json({ error: 'Choose at least one preset or placement.' })
+  }
+
+  // Guard the instance before doing the work, not after: every rendered buffer is
+  // held in memory until the batch is evicted.
+  let requested
   try {
-    const { sourceId, presets: presetIds = [], placements: placementIds = [], meta = {}, policy = {} } = req.body ?? {}
-    const src = sources.get(sourceId)
-    if (!src) return res.status(404).json({ error: 'Unknown source. Re-upload it.' })
-    if (!presetIds.length && !placementIds.length) {
-      return res.status(400).json({ error: 'Choose at least one preset or placement.' })
-    }
+    requested = resolvePlacements({ presets: presetIds, placements: placementIds, medium: 'image' })
+  } catch (err) {
+    return res.status(400).json({ error: err.message })
+  }
+  if (!requested.length) {
+    return res.status(400).json({ error: 'That selection contains no placements that accept a still image.' })
+  }
+  if (requested.length > MAX_PLACEMENTS_PER_BATCH) {
+    return res.status(413).json({
+      error: `${requested.length} placements exceeds this instance's limit of ${MAX_PLACEMENTS_PER_BATCH}. Render fewer at a time, or raise MAX_PLACEMENTS_PER_BATCH on a larger instance.`,
+    })
+  }
 
-    // Guard the instance before doing the work, not after: every rendered buffer
-    // is held in memory until the batch is evicted.
-    const requested = resolvePlacements({ presets: presetIds, placements: placementIds, medium: 'image' })
-    if (requested.length > MAX_PLACEMENTS_PER_BATCH) {
-      return res.status(413).json({
-        error: `${requested.length} placements exceeds this instance's limit of ${MAX_PLACEMENTS_PER_BATCH}. Render fewer at a time, or raise MAX_PLACEMENTS_PER_BATCH on a larger instance.`,
-      })
-    }
+  const id = randomUUID()
+  const job = {
+    id,
+    sourceId,
+    state: 'running',
+    startedAt: Date.now(),
+    progress: { done: 0, total: requested.length, placementId: requested[0].id },
+    result: null,
+    error: null,
+    thumbs: new Map(),
+  }
+  batches.set(id, job)
+  evictBatches()
 
-    const batch = await runBatch({
-      input: src.buffer,
-      analysis: src.analysis,
-      recipe: {
-        presets: presetIds,
-        placements: placementIds,
-        policy,
-        meta: { brand: meta.brand || 'brand', concept: meta.concept || 'concept', version: meta.version || 'v1' },
-      },
+  runBatch({
+    input: src.buffer,
+    analysis: src.analysis,
+    recipe: {
+      presets: presetIds,
+      placements: placementIds,
+      policy,
+      meta: { brand: meta.brand || 'brand', concept: meta.concept || 'concept', version: meta.version || 'v1' },
+    },
+    onProgress: (p) => {
+      if (p.phase === 'render') job.progress = { done: p.done, total: p.total, placementId: p.placementId }
+    },
+  })
+    .then((batch) => {
+      job.result = { ...batch, sourceId }
+      job.progress = { ...job.progress, done: job.progress.total }
+      job.state = 'done'
+      job.finishedAt = Date.now()
+    })
+    .catch((err) => {
+      job.state = 'error'
+      job.error = err.message
+      job.finishedAt = Date.now()
     })
 
-    const id = randomUUID()
-    batches.set(id, { ...batch, sourceId })
-    while (batches.size > MAX_BATCHES) batches.delete(batches.keys().next().value)
-
-    res.json({ id, ...publicBatch(batch) })
-  } catch (err) {
-    res.status(500).json({ error: err.message, stack: err.stack?.split('\n').slice(0, 4) })
-  }
+  res.status(202).json({ id, state: 'running', progress: job.progress })
 })
+
+/** Never evict a job that is still running — its client is waiting on it. */
+function evictBatches() {
+  while (batches.size > MAX_BATCHES) {
+    const victim = [...batches.values()].find((j) => j.state !== 'running')
+    if (!victim) return
+    batches.delete(victim.id)
+  }
+}
 
 app.get('/api/batches/:id', (req, res) => {
-  const batch = batches.get(req.params.id)
-  if (!batch) return res.status(404).json({ error: 'Unknown batch.' })
-  res.json({ id: req.params.id, ...publicBatch(batch) })
+  const job = batches.get(req.params.id)
+  if (!job) return res.status(404).json({ error: 'Unknown batch. It may have been evicted — re-render.' })
+  if (job.state === 'running') {
+    return res.json({ id: job.id, state: 'running', progress: job.progress, elapsedMs: Date.now() - job.startedAt })
+  }
+  if (job.state === 'error') return res.status(500).json({ id: job.id, state: 'error', error: job.error })
+  res.json({ id: job.id, state: 'done', ...publicBatch(job.result) })
 })
 
-app.get('/api/batches/:id/outputs/:placementId', (req, res) => {
-  const batch = batches.get(req.params.id)
+/** The completed result, or null while a job is still running. */
+function resultOf(id) {
+  const job = batches.get(id)
+  return job?.state === 'done' ? job.result : null
+}
+
+/**
+ * Outputs, optionally downscaled. The review grid renders 116px tiles; serving
+ * it full-resolution assets means a 39-placement batch decodes ~80 MB of RGBA in
+ * the tab, which janks or hangs the browser — the other thing that reads as the
+ * app having frozen.
+ */
+app.get('/api/batches/:id/outputs/:placementId', async (req, res) => {
+  const job = batches.get(req.params.id)
+  const batch = resultOf(req.params.id)
   const out = batch?.outputs.find((o) => o.placementId === req.params.placementId)
   if (!out?.buffer) return res.status(404).end()
-  res.type(out.format === 'png' ? 'image/png' : 'image/jpeg').send(out.buffer)
+
+  const width = Math.min(1200, Math.max(0, Number(req.query.w) || 0))
+  const type = out.format === 'png' ? 'image/png' : 'image/jpeg'
+
+  if (!width || width >= out.width) {
+    res.set('Cache-Control', 'private, max-age=3600')
+    return res.type(type).send(out.buffer)
+  }
+
+  const key = `${out.placementId}:${width}`
+  if (!job.thumbs.has(key)) {
+    try {
+      job.thumbs.set(
+        key,
+        await sharp(out.buffer).resize({ width, withoutEnlargement: true }).jpeg({ quality: 74 }).toBuffer()
+      )
+    } catch {
+      return res.type(type).send(out.buffer)
+    }
+  }
+  res.set('Cache-Control', 'private, max-age=3600')
+  res.type('image/jpeg').send(job.thumbs.get(key))
 })
 
 app.get('/api/batches/:id/manifest', (req, res) => {
-  const batch = batches.get(req.params.id)
-  if (!batch) return res.status(404).json({ error: 'Unknown batch.' })
+  const batch = resultOf(req.params.id)
+  if (!batch) return res.status(404).json({ error: 'Batch is not finished.' })
   res.json(buildManifest(batch, { timestamp: new Date().toISOString() }))
 })
 
 app.get('/api/batches/:id/export.zip', (req, res) => {
-  const batch = batches.get(req.params.id)
-  if (!batch) return res.status(404).json({ error: 'Unknown batch.' })
+  const batch = resultOf(req.params.id)
+  if (!batch) return res.status(404).json({ error: 'Batch is not finished.' })
   try {
     const { archive } = buildArchive(batch, {
       includeBlocked: req.query.includeBlocked === '1',
